@@ -1,8 +1,13 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import argparse
-import sys
 import os
+import sys
+
 import py
+
 import pytest
 from _pytest.config import argparsing as parseopt
 
@@ -294,7 +299,7 @@ def test_argcomplete(testdir, monkeypatch):
     script = str(testdir.tmpdir.join("test_argcomplete"))
     pytest_bin = sys.argv[0]
     if "pytest" not in os.path.basename(pytest_bin):
-        pytest.skip("need to be run with pytest executable, not %s" % (pytest_bin,))
+        pytest.skip("need to be run with pytest executable, not {}".format(pytest_bin))
 
     with open(str(script), "w") as fp:
         # redirect output from argcomplete to stdin and stderr is not trivial

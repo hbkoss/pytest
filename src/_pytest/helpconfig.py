@@ -1,12 +1,16 @@
 """ version info, help messages, tracing configuration.  """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-import py
-import pytest
-from _pytest.config import PrintHelp
 import os
 import sys
 from argparse import Action
+
+import py
+
+import pytest
+from _pytest.config import PrintHelp
 
 
 class HelpAction(Action):
@@ -139,7 +143,7 @@ def showhelp(config):
     tw.line()
     tw.line()
     tw.line(
-        "[pytest] ini-options in the first " "pytest.ini|tox.ini|setup.cfg file found:"
+        "[pytest] ini-options in the first pytest.ini|tox.ini|setup.cfg file found:"
     )
     tw.line()
 
@@ -156,6 +160,7 @@ def showhelp(config):
     vars = [
         ("PYTEST_ADDOPTS", "extra command line options"),
         ("PYTEST_PLUGINS", "comma-separated plugins to load during startup"),
+        ("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "set to disable plugin auto-loading"),
         ("PYTEST_DEBUG", "set to enable debug tracing of pytest's internals"),
     ]
     for name, help in vars:

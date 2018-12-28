@@ -1,7 +1,13 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
+import os
 
 import pytest
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
+
+pytestmark = pytest.mark.pytester_example_path("deprecated")
 
 
 def test_yield_tests_deprecation(testdir):
@@ -17,14 +23,83 @@ def test_yield_tests_deprecation(testdir):
                 yield func1, 1, 1
     """
     )
-    result = testdir.runpytest("-ra")
+    result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
     result.stdout.fnmatch_lines(
         [
-            "*yield tests are deprecated, and scheduled to be removed in pytest 4.0*",
+            "*test_yield_tests_deprecation.py:3:*yield tests are deprecated*",
+            "*test_yield_tests_deprecation.py:6:*yield tests are deprecated*",
             "*2 passed*",
         ]
     )
     assert result.stdout.str().count("yield tests are deprecated") == 2
+
+
+def test_compat_properties_deprecation(testdir):
+    testdir.makepyfile(
+        """
+        def test_foo(request):
+            print(request.node.Module)
+    """
+    )
+    result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
+    result.stdout.fnmatch_lines(
+        [
+            "*test_compat_properties_deprecation.py:2:*usage of Function.Module is deprecated, "
+            "please use pytest.Module instead*",
+            "*1 passed, 1 warnings in*",
+        ]
+    )
+
+
+def test_cached_setup_deprecation(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+        @pytest.fixture
+        def fix(request):
+            return request.cached_setup(lambda: 1)
+
+        def test_foo(fix):
+            assert fix == 1
+    """
+    )
+    result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
+    result.stdout.fnmatch_lines(
+        [
+            "*test_cached_setup_deprecation.py:4:*cached_setup is deprecated*",
+            "*1 passed, 1 warnings in*",
+        ]
+    )
+
+
+def test_custom_class_deprecation(testdir):
+    testdir.makeconftest(
+        """
+        import pytest
+
+        class MyModule(pytest.Module):
+
+            class Class(pytest.Class):
+                pass
+
+        def pytest_pycollect_makemodule(path, parent):
+            return MyModule(path, parent)
+    """
+    )
+    testdir.makepyfile(
+        """
+        class Test:
+            def test_foo(self):
+                pass
+    """
+    )
+    result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
+    result.stdout.fnmatch_lines(
+        [
+            '*test_custom_class_deprecation.py:1:*"Class" objects in collectors of type "MyModule*',
+            "*1 passed, 1 warnings in*",
+        ]
+    )
 
 
 def test_funcarg_prefix_deprecation(testdir):
@@ -37,20 +112,19 @@ def test_funcarg_prefix_deprecation(testdir):
             assert value == 10
     """
     )
-    result = testdir.runpytest("-ra")
+    result = testdir.runpytest("-ra", SHOW_PYTEST_WARNINGS_ARG)
     result.stdout.fnmatch_lines(
         [
             (
-                "*pytest_funcarg__value: "
-                'declaring fixtures using "pytest_funcarg__" prefix is deprecated '
-                "and scheduled to be removed in pytest 4.0.  "
-                "Please remove the prefix and use the @pytest.fixture decorator instead."
+                "*test_funcarg_prefix_deprecation.py:1: *pytest_funcarg__value: "
+                'declaring fixtures using "pytest_funcarg__" prefix is deprecated*'
             ),
             "*1 passed*",
         ]
     )
 
 
+@pytest.mark.filterwarnings("default")
 def test_pytest_setup_cfg_deprecated(testdir):
     testdir.makefile(
         ".cfg",
@@ -65,6 +139,7 @@ def test_pytest_setup_cfg_deprecated(testdir):
     )
 
 
+@pytest.mark.filterwarnings("default")
 def test_pytest_custom_cfg_deprecated(testdir):
     testdir.makefile(
         ".cfg",
@@ -79,15 +154,15 @@ def test_pytest_custom_cfg_deprecated(testdir):
     )
 
 
-def test_str_args_deprecated(tmpdir, testdir):
+def test_str_args_deprecated(tmpdir):
     """Deprecate passing strings to pytest.main(). Scheduled for removal in pytest-4.0."""
     from _pytest.main import EXIT_NOTESTSCOLLECTED
 
     warnings = []
 
     class Collect(object):
-        def pytest_logwarning(self, message):
-            warnings.append(message)
+        def pytest_warning_captured(self, warning_message):
+            warnings.append(str(warning_message.message))
 
     ret = pytest.main("%s -x" % tmpdir, plugins=[Collect()])
     msg = (
@@ -102,6 +177,7 @@ def test_getfuncargvalue_is_deprecated(request):
     pytest.deprecated_call(request.getfuncargvalue, "tmpdir")
 
 
+@pytest.mark.filterwarnings("default")
 def test_resultlog_is_deprecated(testdir):
     result = testdir.runpytest("--help")
     result.stdout.fnmatch_lines(["*DEPRECATED path for machine-readable result log*"])
@@ -116,12 +192,11 @@ def test_resultlog_is_deprecated(testdir):
     result.stdout.fnmatch_lines(
         [
             "*--result-log is deprecated and scheduled for removal in pytest 4.0*",
-            "*See https://docs.pytest.org/*/usage.html#creating-resultlog-format-files for more information*",
+            "*See https://docs.pytest.org/en/latest/usage.html#creating-resultlog-format-files for more information*",
         ]
     )
 
 
-@pytest.mark.filterwarnings("always:Metafunc.addcall is deprecated")
 def test_metafunc_addcall_deprecated(testdir):
     testdir.makepyfile(
         """
@@ -132,7 +207,7 @@ def test_metafunc_addcall_deprecated(testdir):
             pass
     """
     )
-    res = testdir.runpytest("-s")
+    res = testdir.runpytest("-s", SHOW_PYTEST_WARNINGS_ARG)
     assert res.ret == 0
     res.stdout.fnmatch_lines(
         ["*Metafunc.addcall is deprecated*", "*2 passed, 2 warnings*"]
@@ -173,21 +248,12 @@ def test_pytest_catchlog_deprecated(testdir, plugin):
 def test_pytest_plugins_in_non_top_level_conftest_deprecated(testdir):
     from _pytest.deprecated import PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST
 
-    subdirectory = testdir.tmpdir.join("subdirectory")
-    subdirectory.mkdir()
-    # create the inner conftest with makeconftest and then move it to the subdirectory
-    testdir.makeconftest(
-        """
+    testdir.makepyfile(
+        **{
+            "subdirectory/conftest.py": """
         pytest_plugins=['capture']
     """
-    )
-    testdir.tmpdir.join("conftest.py").move(subdirectory.join("conftest.py"))
-    # make the top level conftest
-    testdir.makeconftest(
-        """
-        import warnings
-        warnings.filterwarnings('always', category=DeprecationWarning)
-    """
+        }
     )
     testdir.makepyfile(
         """
@@ -195,11 +261,43 @@ def test_pytest_plugins_in_non_top_level_conftest_deprecated(testdir):
             pass
     """
     )
-    res = testdir.runpytest_subprocess()
+    res = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
     assert res.ret == 0
-    res.stderr.fnmatch_lines(
-        "*" + str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
+    msg = str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
+    res.stdout.fnmatch_lines(
+        "*subdirectory{sep}conftest.py:0: RemovedInPytest4Warning: {msg}*".format(
+            sep=os.sep, msg=msg
+        )
     )
+
+
+@pytest.mark.parametrize("use_pyargs", [True, False])
+def test_pytest_plugins_in_non_top_level_conftest_deprecated_pyargs(
+    testdir, use_pyargs
+):
+    """When using --pyargs, do not emit the warning about non-top-level conftest warnings (#4039, #4044)"""
+    from _pytest.deprecated import PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST
+
+    files = {
+        "src/pkg/__init__.py": "",
+        "src/pkg/conftest.py": "",
+        "src/pkg/test_root.py": "def test(): pass",
+        "src/pkg/sub/__init__.py": "",
+        "src/pkg/sub/conftest.py": "pytest_plugins=['capture']",
+        "src/pkg/sub/test_bar.py": "def test(): pass",
+    }
+    testdir.makepyfile(**files)
+    testdir.syspathinsert(testdir.tmpdir.join("src"))
+
+    args = ("--pyargs", "pkg") if use_pyargs else ()
+    args += (SHOW_PYTEST_WARNINGS_ARG,)
+    res = testdir.runpytest(*args)
+    assert res.ret == 0
+    msg = str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
+    if use_pyargs:
+        assert msg not in res.stdout.str()
+    else:
+        res.stdout.fnmatch_lines("*{msg}*".format(msg=msg))
 
 
 def test_pytest_plugins_in_non_top_level_conftest_deprecated_no_top_level_conftest(
@@ -227,8 +325,11 @@ def test_pytest_plugins_in_non_top_level_conftest_deprecated_no_top_level_confte
 
     res = testdir.runpytest_subprocess()
     assert res.ret == 0
-    res.stderr.fnmatch_lines(
-        "*" + str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
+    msg = str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
+    res.stdout.fnmatch_lines(
+        "*subdirectory{sep}conftest.py:0: RemovedInPytest4Warning: {msg}*".format(
+            sep=os.sep, msg=msg
+        )
     )
 
 
@@ -261,10 +362,8 @@ def test_pytest_plugins_in_non_top_level_conftest_deprecated_no_false_positives(
     )
     res = testdir.runpytest_subprocess()
     assert res.ret == 0
-    assert (
-        str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
-        not in res.stderr.str()
-    )
+    msg = str(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST).splitlines()[0]
+    assert msg not in res.stdout.str()
 
 
 def test_call_fixture_function_deprecated():
@@ -276,3 +375,33 @@ def test_call_fixture_function_deprecated():
 
     with pytest.deprecated_call():
         assert fix() == 1
+
+
+def test_pycollector_makeitem_is_deprecated():
+    from _pytest.python import PyCollector
+    from _pytest.warning_types import RemovedInPytest4Warning
+
+    class PyCollectorMock(PyCollector):
+        """evil hack"""
+
+        def __init__(self):
+            self.called = False
+
+        def _makeitem(self, *k):
+            """hack to disable the actual behaviour"""
+            self.called = True
+
+    collector = PyCollectorMock()
+    with pytest.warns(RemovedInPytest4Warning):
+        collector.makeitem("foo", "bar")
+    assert collector.called
+
+
+def test_fixture_named_request(testdir):
+    testdir.copy_example()
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(
+        [
+            "*'request' is a reserved name for fixtures and will raise an error in future versions"
+        ]
+    )

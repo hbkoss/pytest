@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-from textwrap import dedent
+import textwrap
 
 import _pytest._code
 import pytest
 from _pytest.main import EXIT_NOTESTSCOLLECTED
 from _pytest.nodes import Collector
-
-ignore_parametrized_marks = pytest.mark.filterwarnings(
-    "ignore:Applying marks directly to parameters"
-)
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
 
 
 class TestModule(object):
@@ -47,13 +44,14 @@ class TestModule(object):
         p = root2.join("test_x456.py")
         monkeypatch.syspath_prepend(str(root1))
         p.write(
-            dedent(
+            textwrap.dedent(
                 """\
-            import x456
-            def test():
-                assert x456.__file__.startswith(%r)
-        """
-                % str(root2)
+                import x456
+                def test():
+                    assert x456.__file__.startswith({!r})
+                """.format(
+                    str(root2)
+                )
             )
         )
         with root2.as_cwd():
@@ -243,6 +241,9 @@ class TestClass(object):
         assert result.ret == EXIT_NOTESTSCOLLECTED
 
 
+@pytest.mark.filterwarnings(
+    "ignore:usage of Generator.Function is deprecated, please use pytest.Function instead"
+)
 class TestGenerator(object):
     def test_generative_functions(self, testdir):
         modcol = testdir.getmodulecol(
@@ -370,7 +371,7 @@ class TestGenerator(object):
                 yield assert_order_of_execution
         """
         )
-        reprec = testdir.inline_run(o)
+        reprec = testdir.inline_run(o, SHOW_PYTEST_WARNINGS_ARG)
         passed, skipped, failed = reprec.countoutcomes()
         assert passed == 7
         assert not skipped and not failed
@@ -404,7 +405,7 @@ class TestGenerator(object):
                 yield assert_order_of_execution
         """
         )
-        reprec = testdir.inline_run(o)
+        reprec = testdir.inline_run(o, SHOW_PYTEST_WARNINGS_ARG)
         passed, skipped, failed = reprec.countoutcomes()
         assert passed == 4
         assert not skipped and not failed
@@ -448,19 +449,27 @@ class TestGenerator(object):
                 assert setuplist[1] != setuplist[2], setuplist
         """
         )
-        reprec = testdir.inline_run(o, "-v")
+        reprec = testdir.inline_run(o, "-v", SHOW_PYTEST_WARNINGS_ARG)
         passed, skipped, failed = reprec.countoutcomes()
         assert passed == 4
         assert not skipped and not failed
 
 
 class TestFunction(object):
+    @pytest.fixture
+    def ignore_parametrized_marks_args(self):
+        """Provides arguments to pytester.runpytest() to ignore the warning about marks being applied directly
+        to parameters.
+        """
+        return ("-W", "ignore:Applying marks directly to parameters")
+
     def test_getmodulecollector(self, testdir):
         item = testdir.getitem("def test_func(): pass")
         modcol = item.getparent(pytest.Module)
         assert isinstance(modcol, pytest.Module)
         assert hasattr(modcol.obj, "test_func")
 
+    @pytest.mark.filterwarnings("default")
     def test_function_as_object_instance_ignored(self, testdir):
         testdir.makepyfile(
             """
@@ -471,8 +480,14 @@ class TestFunction(object):
             test_a = A()
         """
         )
-        reprec = testdir.inline_run()
-        reprec.assertoutcome()
+        result = testdir.runpytest()
+        result.stdout.fnmatch_lines(
+            [
+                "collected 0 items",
+                "*test_function_as_object_instance_ignored.py:2: "
+                "*cannot collect 'test_a' because it is not a function.",
+            ]
+        )
 
     def test_function_equality(self, testdir, tmpdir):
         from _pytest.fixtures import FixtureManager
@@ -661,7 +676,7 @@ class TestFunction(object):
         rec = testdir.inline_run()
         rec.assertoutcome(passed=1)
 
-    @ignore_parametrized_marks
+    @pytest.mark.filterwarnings("ignore:Applying marks directly to parameters")
     def test_parametrize_with_mark(self, testdir):
         items = testdir.getitems(
             """
@@ -747,8 +762,7 @@ class TestFunction(object):
         assert colitems[2].name == "test2[a-c]"
         assert colitems[3].name == "test2[b-c]"
 
-    @ignore_parametrized_marks
-    def test_parametrize_skipif(self, testdir):
+    def test_parametrize_skipif(self, testdir, ignore_parametrized_marks_args):
         testdir.makepyfile(
             """
             import pytest
@@ -760,11 +774,10 @@ class TestFunction(object):
                 assert x < 2
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(*ignore_parametrized_marks_args)
         result.stdout.fnmatch_lines("* 2 passed, 1 skipped in *")
 
-    @ignore_parametrized_marks
-    def test_parametrize_skip(self, testdir):
+    def test_parametrize_skip(self, testdir, ignore_parametrized_marks_args):
         testdir.makepyfile(
             """
             import pytest
@@ -776,11 +789,10 @@ class TestFunction(object):
                 assert x < 2
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(*ignore_parametrized_marks_args)
         result.stdout.fnmatch_lines("* 2 passed, 1 skipped in *")
 
-    @ignore_parametrized_marks
-    def test_parametrize_skipif_no_skip(self, testdir):
+    def test_parametrize_skipif_no_skip(self, testdir, ignore_parametrized_marks_args):
         testdir.makepyfile(
             """
             import pytest
@@ -792,11 +804,10 @@ class TestFunction(object):
                 assert x < 2
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(*ignore_parametrized_marks_args)
         result.stdout.fnmatch_lines("* 1 failed, 2 passed in *")
 
-    @ignore_parametrized_marks
-    def test_parametrize_xfail(self, testdir):
+    def test_parametrize_xfail(self, testdir, ignore_parametrized_marks_args):
         testdir.makepyfile(
             """
             import pytest
@@ -808,11 +819,10 @@ class TestFunction(object):
                 assert x < 2
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(*ignore_parametrized_marks_args)
         result.stdout.fnmatch_lines("* 2 passed, 1 xfailed in *")
 
-    @ignore_parametrized_marks
-    def test_parametrize_passed(self, testdir):
+    def test_parametrize_passed(self, testdir, ignore_parametrized_marks_args):
         testdir.makepyfile(
             """
             import pytest
@@ -824,11 +834,10 @@ class TestFunction(object):
                 pass
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(*ignore_parametrized_marks_args)
         result.stdout.fnmatch_lines("* 2 passed, 1 xpassed in *")
 
-    @ignore_parametrized_marks
-    def test_parametrize_xfail_passed(self, testdir):
+    def test_parametrize_xfail_passed(self, testdir, ignore_parametrized_marks_args):
         testdir.makepyfile(
             """
             import pytest
@@ -840,7 +849,7 @@ class TestFunction(object):
                 pass
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(*ignore_parametrized_marks_args)
         result.stdout.fnmatch_lines("* 3 passed in *")
 
     def test_function_original_name(self, testdir):
@@ -929,23 +938,23 @@ class TestConftestCustomization(object):
     def test_customized_pymakemodule_issue205_subdir(self, testdir):
         b = testdir.mkdir("a").mkdir("b")
         b.join("conftest.py").write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                import pytest
+                @pytest.hookimpl(hookwrapper=True)
+                def pytest_pycollect_makemodule():
+                    outcome = yield
+                    mod = outcome.get_result()
+                    mod.obj.hello = "world"
                 """
-            import pytest
-            @pytest.hookimpl(hookwrapper=True)
-            def pytest_pycollect_makemodule():
-                outcome = yield
-                mod = outcome.get_result()
-                mod.obj.hello = "world"
-        """
             )
         )
         b.join("test_module.py").write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                def test_hello():
+                    assert hello == "world"
                 """
-            def test_hello():
-                assert hello == "world"
-        """
             )
         )
         reprec = testdir.inline_run()
@@ -954,31 +963,31 @@ class TestConftestCustomization(object):
     def test_customized_pymakeitem(self, testdir):
         b = testdir.mkdir("a").mkdir("b")
         b.join("conftest.py").write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                import pytest
+                @pytest.hookimpl(hookwrapper=True)
+                def pytest_pycollect_makeitem():
+                    outcome = yield
+                    if outcome.excinfo is None:
+                        result = outcome.get_result()
+                        if result:
+                            for func in result:
+                                func._some123 = "world"
                 """
-            import pytest
-            @pytest.hookimpl(hookwrapper=True)
-            def pytest_pycollect_makeitem():
-                outcome = yield
-                if outcome.excinfo is None:
-                    result = outcome.get_result()
-                    if result:
-                        for func in result:
-                            func._some123 = "world"
-        """
             )
         )
         b.join("test_module.py").write(
-            _pytest._code.Source(
-                """
-            import pytest
+            textwrap.dedent(
+                """\
+                import pytest
 
-            @pytest.fixture()
-            def obj(request):
-                return request.node._some123
-            def test_hello(obj):
-                assert obj == "world"
-        """
+                @pytest.fixture()
+                def obj(request):
+                    return request.node._some123
+                def test_hello(obj):
+                    assert obj == "world"
+                """
             )
         )
         reprec = testdir.inline_run()
@@ -1033,7 +1042,7 @@ class TestConftestCustomization(object):
         )
         testdir.makefile(
             ".narf",
-            """
+            """\
             def test_something():
                 assert 1 + 1 == 2""",
         )
@@ -1046,29 +1055,29 @@ def test_setup_only_available_in_subdir(testdir):
     sub1 = testdir.mkpydir("sub1")
     sub2 = testdir.mkpydir("sub2")
     sub1.join("conftest.py").write(
-        _pytest._code.Source(
+        textwrap.dedent(
+            """\
+            import pytest
+            def pytest_runtest_setup(item):
+                assert item.fspath.purebasename == "test_in_sub1"
+            def pytest_runtest_call(item):
+                assert item.fspath.purebasename == "test_in_sub1"
+            def pytest_runtest_teardown(item):
+                assert item.fspath.purebasename == "test_in_sub1"
             """
-        import pytest
-        def pytest_runtest_setup(item):
-            assert item.fspath.purebasename == "test_in_sub1"
-        def pytest_runtest_call(item):
-            assert item.fspath.purebasename == "test_in_sub1"
-        def pytest_runtest_teardown(item):
-            assert item.fspath.purebasename == "test_in_sub1"
-    """
         )
     )
     sub2.join("conftest.py").write(
-        _pytest._code.Source(
+        textwrap.dedent(
+            """\
+            import pytest
+            def pytest_runtest_setup(item):
+                assert item.fspath.purebasename == "test_in_sub2"
+            def pytest_runtest_call(item):
+                assert item.fspath.purebasename == "test_in_sub2"
+            def pytest_runtest_teardown(item):
+                assert item.fspath.purebasename == "test_in_sub2"
             """
-        import pytest
-        def pytest_runtest_setup(item):
-            assert item.fspath.purebasename == "test_in_sub2"
-        def pytest_runtest_call(item):
-            assert item.fspath.purebasename == "test_in_sub2"
-        def pytest_runtest_teardown(item):
-            assert item.fspath.purebasename == "test_in_sub2"
-    """
         )
     )
     sub1.join("test_in_sub1.py").write("def test_1(): pass")
@@ -1250,6 +1259,9 @@ class TestReportInfo(object):
         assert lineno == 1
         assert msg == "TestClass"
 
+    @pytest.mark.filterwarnings(
+        "ignore:usage of Generator.Function is deprecated, please use pytest.Function instead"
+    )
     def test_generator_reportinfo(self, testdir):
         modcol = testdir.getmodulecol(
             """
@@ -1369,7 +1381,7 @@ def test_collector_attributes(testdir):
             pass
     """
     )
-    result = testdir.runpytest()
+    result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
     result.stdout.fnmatch_lines(["*1 passed*"])
 
 
@@ -1396,10 +1408,8 @@ def test_customize_through_attributes(testdir):
                 pass
     """
     )
-    result = testdir.runpytest("--collect-only")
-    result.stdout.fnmatch_lines(
-        ["*MyClass*", "*MyInstance*", "*MyFunction*test_hello*"]
-    )
+    result = testdir.runpytest("--collect-only", SHOW_PYTEST_WARNINGS_ARG)
+    result.stdout.fnmatch_lines(["*MyClass*", "*MyFunction*test_hello*"])
 
 
 def test_unorderable_types(testdir):
@@ -1467,6 +1477,7 @@ def test_collect_functools_partial(testdir):
     result.assertoutcome(passed=6, failed=2)
 
 
+@pytest.mark.filterwarnings("default")
 def test_dont_collect_non_function_callable(testdir):
     """Test for issue https://github.com/pytest-dev/pytest/issues/331
 
@@ -1489,7 +1500,7 @@ def test_dont_collect_non_function_callable(testdir):
     result.stdout.fnmatch_lines(
         [
             "*collected 1 item*",
-            "*cannot collect 'test_a' because it is not a function*",
+            "*test_dont_collect_non_function_callable.py:2: *cannot collect 'test_a' because it is not a function*",
             "*1 passed, 1 warnings in *",
         ]
     )
@@ -1547,12 +1558,12 @@ def test_skip_duplicates_by_default(testdir):
     a = testdir.mkdir("a")
     fh = a.join("test_a.py")
     fh.write(
-        _pytest._code.Source(
+        textwrap.dedent(
+            """\
+            import pytest
+            def test_real():
+                pass
             """
-        import pytest
-        def test_real():
-            pass
-    """
         )
     )
     result = testdir.runpytest(a.strpath, a.strpath)
@@ -1567,12 +1578,12 @@ def test_keep_duplicates(testdir):
     a = testdir.mkdir("a")
     fh = a.join("test_a.py")
     fh.write(
-        _pytest._code.Source(
+        textwrap.dedent(
+            """\
+            import pytest
+            def test_real():
+                pass
             """
-        import pytest
-        def test_real():
-            pass
-    """
         )
     )
     result = testdir.runpytest("--keep-duplicates", a.strpath, a.strpath)
@@ -1583,3 +1594,85 @@ def test_package_collection_infinite_recursion(testdir):
     testdir.copy_example("collect/package_infinite_recursion")
     result = testdir.runpytest()
     result.stdout.fnmatch_lines("*1 passed*")
+
+
+def test_package_collection_init_given_as_argument(testdir):
+    """Regression test for #3749"""
+    p = testdir.copy_example("collect/package_init_given_as_arg")
+    result = testdir.runpytest(p / "pkg" / "__init__.py")
+    result.stdout.fnmatch_lines("*1 passed*")
+
+
+def test_package_with_modules(testdir):
+    """
+    .
+    └── root
+        ├── __init__.py
+        ├── sub1
+        │   ├── __init__.py
+        │   └── sub1_1
+        │       ├── __init__.py
+        │       └── test_in_sub1.py
+        └── sub2
+            └── test
+                └── test_in_sub2.py
+
+    """
+    root = testdir.mkpydir("root")
+    sub1 = root.mkdir("sub1")
+    sub1.ensure("__init__.py")
+    sub1_test = sub1.mkdir("sub1_1")
+    sub1_test.ensure("__init__.py")
+    sub2 = root.mkdir("sub2")
+    sub2_test = sub2.mkdir("sub2")
+
+    sub1_test.join("test_in_sub1.py").write("def test_1(): pass")
+    sub2_test.join("test_in_sub2.py").write("def test_2(): pass")
+
+    # Execute from .
+    result = testdir.runpytest("-v", "-s")
+    result.assert_outcomes(passed=2)
+
+    # Execute from . with one argument "root"
+    result = testdir.runpytest("-v", "-s", "root")
+    result.assert_outcomes(passed=2)
+
+    # Chdir into package's root and execute with no args
+    root.chdir()
+    result = testdir.runpytest("-v", "-s")
+    result.assert_outcomes(passed=2)
+
+
+def test_package_ordering(testdir):
+    """
+    .
+    └── root
+        ├── Test_root.py
+        ├── __init__.py
+        ├── sub1
+        │   ├── Test_sub1.py
+        │   └── __init__.py
+        └── sub2
+            └── test
+                └── test_sub2.py
+
+    """
+    testdir.makeini(
+        """
+        [pytest]
+        python_files=*.py
+    """
+    )
+    root = testdir.mkpydir("root")
+    sub1 = root.mkdir("sub1")
+    sub1.ensure("__init__.py")
+    sub2 = root.mkdir("sub2")
+    sub2_test = sub2.mkdir("sub2")
+
+    root.join("Test_root.py").write("def test_1(): pass")
+    sub1.join("Test_sub1.py").write("def test_2(): pass")
+    sub2_test.join("test_sub2.py").write("def test_3(): pass")
+
+    # Execute from .
+    result = testdir.runpytest("-v", "-s")
+    result.assert_outcomes(passed=3)

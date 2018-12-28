@@ -1,5 +1,5 @@
-.. image:: http://docs.pytest.org/en/latest/_static/pytest1.png
-   :target: http://docs.pytest.org
+.. image:: https://docs.pytest.org/en/latest/_static/pytest1.png
+   :target: https://docs.pytest.org/en/latest/
    :align: center
    :alt: pytest
 
@@ -15,8 +15,9 @@
 .. image:: https://img.shields.io/pypi/pyversions/pytest.svg
     :target: https://pypi.org/project/pytest/
 
-.. image:: https://img.shields.io/coveralls/pytest-dev/pytest/master.svg
-    :target: https://coveralls.io/r/pytest-dev/pytest
+.. image:: https://codecov.io/gh/pytest-dev/pytest/branch/master/graph/badge.svg
+    :target: https://codecov.io/gh/pytest-dev/pytest
+    :alt: Code coverage Status
 
 .. image:: https://travis-ci.org/pytest-dev/pytest.svg?branch=master
     :target: https://travis-ci.org/pytest-dev/pytest
@@ -25,7 +26,7 @@
     :target: https://ci.appveyor.com/project/pytestbot/pytest
 
 .. image:: https://img.shields.io/badge/code%20style-black-000000.svg
-  :target: https://github.com/ambv/black
+    :target: https://github.com/ambv/black
 
 .. image:: https://www.codetriage.com/pytest-dev/pytest/badges/users.svg
     :target: https://www.codetriage.com/pytest-dev/pytest
@@ -66,23 +67,23 @@ To execute it::
     ========================== 1 failed in 0.04 seconds ===========================
 
 
-Due to ``pytest``'s detailed assertion introspection, only plain ``assert`` statements are used. See `getting-started <http://docs.pytest.org/en/latest/getting-started.html#our-first-test-run>`_ for more examples.
+Due to ``pytest``'s detailed assertion introspection, only plain ``assert`` statements are used. See `getting-started <https://docs.pytest.org/en/latest/getting-started.html#our-first-test-run>`_ for more examples.
 
 
 Features
 --------
 
-- Detailed info on failing `assert statements <http://docs.pytest.org/en/latest/assert.html>`_ (no need to remember ``self.assert*`` names);
+- Detailed info on failing `assert statements <https://docs.pytest.org/en/latest/assert.html>`_ (no need to remember ``self.assert*`` names);
 
 - `Auto-discovery
-  <http://docs.pytest.org/en/latest/goodpractices.html#python-test-discovery>`_
+  <https://docs.pytest.org/en/latest/goodpractices.html#python-test-discovery>`_
   of test modules and functions;
 
-- `Modular fixtures <http://docs.pytest.org/en/latest/fixture.html>`_ for
+- `Modular fixtures <https://docs.pytest.org/en/latest/fixture.html>`_ for
   managing small or parametrized long-lived test resources;
 
-- Can run `unittest <http://docs.pytest.org/en/latest/unittest.html>`_ (or trial),
-  `nose <http://docs.pytest.org/en/latest/nose.html>`_ test suites out of the box;
+- Can run `unittest <https://docs.pytest.org/en/latest/unittest.html>`_ (or trial),
+  `nose <https://docs.pytest.org/en/latest/nose.html>`_ test suites out of the box;
 
 - Python 2.7, Python 3.4+, PyPy 2.3, Jython 2.5 (untested);
 
@@ -92,7 +93,7 @@ Features
 Documentation
 -------------
 
-For full documentation, including installation, tutorials and PDF documents, please see http://docs.pytest.org.
+For full documentation, including installation, tutorials and PDF documents, please see https://docs.pytest.org/en/latest/.
 
 
 Bugs/Requests
@@ -104,7 +105,7 @@ Please use the `GitHub issue tracker <https://github.com/pytest-dev/pytest/issue
 Changelog
 ---------
 
-Consult the `Changelog <http://docs.pytest.org/en/latest/changelog.html>`__ page for fixes and enhancements of each version.
+Consult the `Changelog <https://docs.pytest.org/en/latest/changelog.html>`__ page for fixes and enhancements of each version.
 
 
 License

@@ -1,10 +1,13 @@
 """ log machine-parseable test session result information in a plain
 text file.
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import os
 
 import py
-import os
 
 
 def pytest_addoption(parser):
@@ -31,8 +34,9 @@ def pytest_configure(config):
         config.pluginmanager.register(config._resultlog)
 
         from _pytest.deprecated import RESULT_LOG
+        from _pytest.warnings import _issue_config_warning
 
-        config.warn("C1", RESULT_LOG)
+        _issue_config_warning(RESULT_LOG, config, stacklevel=2)
 
 
 def pytest_unconfigure(config):

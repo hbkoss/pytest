@@ -1,6 +1,11 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
 import sys
+
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
 
 try:
     import mock
@@ -13,10 +18,10 @@ from _pytest.mark import (
     transfer_markers,
     EMPTY_PARAMETERSET_OPTION,
 )
-from _pytest.nodes import Node
+from _pytest.nodes import Node, Collector
 
 ignore_markinfo = pytest.mark.filterwarnings(
-    "ignore:MarkInfo objects:_pytest.deprecated.RemovedInPytest4Warning"
+    "ignore:MarkInfo objects:pytest.RemovedInPytest4Warning"
 )
 
 
@@ -184,7 +189,7 @@ def test_ini_markers(testdir):
         """
         def test_markers(pytestconfig):
             markers = pytestconfig.getini("markers")
-            print (markers)
+            print(markers)
             assert len(markers) >= 2
             assert markers[0].startswith("a1:")
             assert markers[1].startswith("a2:")
@@ -247,7 +252,7 @@ def test_marker_without_description(testdir):
     )
     ftdir = testdir.mkdir("ft1_dummy")
     testdir.tmpdir.join("conftest.py").move(ftdir.join("conftest.py"))
-    rec = testdir.runpytest_subprocess("--strict")
+    rec = testdir.runpytest("--strict")
     rec.assert_outcomes()
 
 
@@ -302,7 +307,7 @@ def test_strict_prohibits_unregistered_markers(testdir):
     )
     result = testdir.runpytest("--strict")
     assert result.ret != 0
-    result.stdout.fnmatch_lines(["*unregisteredmark*not*registered*"])
+    result.stdout.fnmatch_lines(["'unregisteredmark' not a registered marker"])
 
 
 @pytest.mark.parametrize(
@@ -799,6 +804,18 @@ class TestFunctional(object):
         deselected_tests = dlist[0].items
         assert len(deselected_tests) == 2
 
+    def test_invalid_m_option(self, testdir):
+        testdir.makepyfile(
+            """
+            def test_a():
+                pass
+        """
+        )
+        result = testdir.runpytest("-m bogus/")
+        result.stdout.fnmatch_lines(
+            ["INTERNALERROR> Marker expression must be valid Python!"]
+        )
+
     def test_keywords_at_node_level(self, testdir):
         testdir.makepyfile(
             """
@@ -847,7 +864,7 @@ class TestFunctional(object):
                 assert marker.kwargs == {}
         """
         )
-        reprec = testdir.inline_run("-m", "mark1")
+        reprec = testdir.inline_run("-m", "mark1", SHOW_PYTEST_WARNINGS_ARG)
         reprec.assertoutcome(passed=1)
 
     def assert_markers(self, items, **expected):
@@ -889,7 +906,7 @@ class TestFunctional(object):
                 assert True
         """
         )
-        reprec = testdir.inline_run()
+        reprec = testdir.inline_run(SHOW_PYTEST_WARNINGS_ARG)
         reprec.assertoutcome(skipped=1)
 
 
@@ -1039,10 +1056,19 @@ class TestKeywordSelection(object):
         ),
     ],
 )
-@pytest.mark.filterwarnings("ignore")
+@pytest.mark.filterwarnings("default")
 def test_parameterset_extractfrom(argval, expected):
-    extracted = ParameterSet.extract_from(argval)
+    from _pytest.deprecated import MARK_PARAMETERSET_UNPACKING
+
+    warn_called = []
+
+    class DummyItem:
+        def warn(self, warning):
+            warn_called.append(warning)
+
+    extracted = ParameterSet.extract_from(argval, belonging_definition=DummyItem())
     assert extracted == expected
+    assert warn_called == [MARK_PARAMETERSET_UNPACKING]
 
 
 def test_legacy_transfer():
@@ -1082,7 +1108,14 @@ class TestMarkDecorator(object):
 @pytest.mark.parametrize("mark", [None, "", "skip", "xfail"])
 def test_parameterset_for_parametrize_marks(testdir, mark):
     if mark is not None:
-        testdir.makeini("[pytest]\n{}={}".format(EMPTY_PARAMETERSET_OPTION, mark))
+        testdir.makeini(
+            """
+        [pytest]
+        {}={}
+        """.format(
+                EMPTY_PARAMETERSET_OPTION, mark
+            )
+        )
 
     config = testdir.parseconfig()
     from _pytest.mark import pytest_configure, get_empty_parameterset_mark
@@ -1096,6 +1129,34 @@ def test_parameterset_for_parametrize_marks(testdir, mark):
     assert result_mark.kwargs["reason"].startswith("got empty parameter set ")
     if mark == "xfail":
         assert result_mark.kwargs.get("run") is False
+
+
+def test_parameterset_for_fail_at_collect(testdir):
+    testdir.makeini(
+        """
+    [pytest]
+    {}=fail_at_collect
+    """.format(
+            EMPTY_PARAMETERSET_OPTION
+        )
+    )
+
+    config = testdir.parseconfig()
+    from _pytest.mark import pytest_configure, get_empty_parameterset_mark
+    from _pytest.compat import getfslineno
+
+    pytest_configure(config)
+
+    test_func = all
+    func_name = test_func.__name__
+    _, func_lineno = getfslineno(test_func)
+    expected_errmsg = r"Empty parameter set in '%s' at line %d" % (
+        func_name,
+        func_lineno,
+    )
+
+    with pytest.raises(Collector.CollectError, match=expected_errmsg):
+        get_empty_parameterset_mark(config, ["a"], test_func)
 
 
 def test_parameterset_for_parametrize_bad_markname(testdir):
@@ -1189,5 +1250,5 @@ def test_markers_from_parametrize(testdir):
     """
     )
 
-    result = testdir.runpytest()
+    result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
     result.assert_outcomes(passed=4)

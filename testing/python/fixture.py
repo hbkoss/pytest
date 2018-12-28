@@ -1,11 +1,14 @@
-from textwrap import dedent
+# -*- coding: utf-8 -*-
+import sys
+import textwrap
 
-import _pytest._code
 import pytest
-from _pytest.pytester import get_public_names
-from _pytest.fixtures import FixtureLookupError, FixtureRequest
 from _pytest import fixtures
-from _pytest.compat import Path
+from _pytest.fixtures import FixtureLookupError
+from _pytest.fixtures import FixtureRequest
+from _pytest.pathlib import Path
+from _pytest.pytester import get_public_names
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
 
 
 def test_getfuncargnames():
@@ -57,6 +60,13 @@ class TestFillFixtures(object):
             *fixture*some*not found*
             *xyzsomething*
             """
+        )
+
+    def test_detect_recursive_dependency_error(self, testdir):
+        testdir.copy_example()
+        result = testdir.runpytest()
+        result.stdout.fnmatch_lines(
+            ["*recursive dependency involving fixture 'fix1' detected*"]
         )
 
     def test_funcarg_basic(self, testdir):
@@ -208,23 +218,23 @@ class TestFillFixtures(object):
         )
         subdir = testdir.mkpydir("subdir")
         subdir.join("conftest.py").write(
-            _pytest._code.Source(
-                """
-            import pytest
+            textwrap.dedent(
+                """\
+                import pytest
 
-            @pytest.fixture
-            def spam():
-                return 'spam'
-        """
+                @pytest.fixture
+                def spam():
+                    return 'spam'
+                """
             )
         )
         testfile = subdir.join("test_spam.py")
         testfile.write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                def test_spam(spam):
+                    assert spam == "spam"
                 """
-            def test_spam(spam):
-                assert spam == "spam"
-        """
             )
         )
         result = testdir.runpytest()
@@ -276,26 +286,26 @@ class TestFillFixtures(object):
         )
         subdir = testdir.mkpydir("subdir")
         subdir.join("conftest.py").write(
-            _pytest._code.Source(
-                """
-            import pytest
+            textwrap.dedent(
+                """\
+                import pytest
 
-            @pytest.fixture(params=[1, 2, 3])
-            def spam(request):
-                return request.param
-        """
+                @pytest.fixture(params=[1, 2, 3])
+                def spam(request):
+                    return request.param
+                """
             )
         )
         testfile = subdir.join("test_spam.py")
         testfile.write(
-            _pytest._code.Source(
-                """
-            params = {'spam': 1}
+            textwrap.dedent(
+                """\
+                params = {'spam': 1}
 
-            def test_spam(spam):
-                assert spam == params['spam']
-                params['spam'] += 1
-        """
+                def test_spam(spam):
+                    assert spam == params['spam']
+                    params['spam'] += 1
+                """
             )
         )
         result = testdir.runpytest()
@@ -320,26 +330,26 @@ class TestFillFixtures(object):
         )
         subdir = testdir.mkpydir("subdir")
         subdir.join("conftest.py").write(
-            _pytest._code.Source(
-                """
-            import pytest
+            textwrap.dedent(
+                """\
+                import pytest
 
-            @pytest.fixture(params=[1, 2, 3])
-            def spam(request):
-                return request.param
-        """
+                @pytest.fixture(params=[1, 2, 3])
+                def spam(request):
+                    return request.param
+                """
             )
         )
         testfile = subdir.join("test_spam.py")
         testfile.write(
-            _pytest._code.Source(
-                """
-            params = {'spam': 1}
+            textwrap.dedent(
+                """\
+                params = {'spam': 1}
 
-            def test_spam(spam):
-                assert spam == params['spam']
-                params['spam'] += 1
-        """
+                def test_spam(spam):
+                    assert spam == params['spam']
+                    params['spam'] += 1
+                """
             )
         )
         result = testdir.runpytest()
@@ -488,7 +498,17 @@ class TestRequestBasic(object):
         assert len(arg2fixturedefs) == 1
         assert arg2fixturedefs["something"][0].argname == "something"
 
+    @pytest.mark.skipif(
+        hasattr(sys, "pypy_version_info"),
+        reason="this method of test doesn't work on pypy",
+    )
     def test_request_garbage(self, testdir):
+        try:
+            import xdist  # noqa
+        except ImportError:
+            pass
+        else:
+            pytest.xfail("this test is flaky when executed with xdist")
         testdir.makepyfile(
             """
             import sys
@@ -498,33 +518,25 @@ class TestRequestBasic(object):
 
             @pytest.fixture(autouse=True)
             def something(request):
-                # this method of test doesn't work on pypy
-                if hasattr(sys, "pypy_version_info"):
-                    yield
-                else:
-                    original = gc.get_debug()
-                    gc.set_debug(gc.DEBUG_SAVEALL)
+                original = gc.get_debug()
+                gc.set_debug(gc.DEBUG_SAVEALL)
+                gc.collect()
+
+                yield
+
+                try:
                     gc.collect()
-
-                    yield
-
-                    gc.collect()
-                    leaked_types = sum(1 for _ in gc.garbage
-                                       if isinstance(_, PseudoFixtureDef))
-
-                    gc.garbage[:] = []
-
-                    try:
-                        assert leaked_types == 0
-                    finally:
-                        gc.set_debug(original)
+                    leaked = [x for _ in gc.garbage if isinstance(_, PseudoFixtureDef)]
+                    assert leaked == []
+                finally:
+                    gc.set_debug(original)
 
             def test_func():
                 pass
         """
         )
-        reprec = testdir.inline_run()
-        reprec.assertoutcome(passed=1)
+        result = testdir.runpytest_subprocess()
+        result.stdout.fnmatch_lines("* 1 passed in *")
 
     def test_getfixturevalue_recursive(self, testdir):
         testdir.makeconftest(
@@ -752,6 +764,12 @@ class TestRequestBasic(object):
         reprec = testdir.inline_run()
         reprec.assertoutcome(passed=1)
 
+    def test_request_fixturenames_dynamic_fixture(self, testdir):
+        """Regression test for #3057"""
+        testdir.copy_example("fixtures/test_getfixturevalue_dynamic.py")
+        result = testdir.runpytest()
+        result.stdout.fnmatch_lines("*1 passed*")
+
     def test_funcargnames_compatattr(self, testdir):
         testdir.makepyfile(
             """
@@ -807,13 +825,13 @@ class TestRequestBasic(object):
         # this tests that normalization of nodeids takes place
         b = testdir.mkdir("tests").mkdir("unit")
         b.join("conftest.py").write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                import pytest
+                @pytest.fixture
+                def arg1():
+                    pass
                 """
-            import pytest
-            @pytest.fixture
-            def arg1():
-                pass
-        """
             )
         )
         p = b.join("test_module.py")
@@ -951,7 +969,8 @@ class TestRequestCachedSetup(object):
             class TestClass(object):
                 def test_func1a(self, something):
                     assert something == "hello"
-        """
+        """,
+            SHOW_PYTEST_WARNINGS_ARG,
         )
         reprec.assertoutcome(passed=2)
 
@@ -973,10 +992,12 @@ class TestRequestCachedSetup(object):
                     assert something == "hello"
                 def test_func2b(self, something):
                     assert something == "hello"
-        """
+        """,
+            SHOW_PYTEST_WARNINGS_ARG,
         )
         reprec.assertoutcome(passed=4)
 
+    @pytest.mark.filterwarnings("ignore:cached_setup is deprecated")
     def test_request_cachedsetup_extrakey(self, testdir):
         item1 = testdir.getitem("def test_func(): pass")
         req1 = fixtures.FixtureRequest(item1)
@@ -994,6 +1015,7 @@ class TestRequestCachedSetup(object):
         assert ret1 == ret1b
         assert ret2 == ret2b
 
+    @pytest.mark.filterwarnings("ignore:cached_setup is deprecated")
     def test_request_cachedsetup_cache_deletion(self, testdir):
         item1 = testdir.getitem("def test_func(): pass")
         req1 = fixtures.FixtureRequest(item1)
@@ -1031,7 +1053,7 @@ class TestRequestCachedSetup(object):
                 assert arg1 != arg2
         """
         )
-        result = testdir.runpytest("-v")
+        result = testdir.runpytest("-v", SHOW_PYTEST_WARNINGS_ARG)
         result.stdout.fnmatch_lines(["*1 passed*"])
 
     def test_request_cached_setup_getfixturevalue(self, testdir):
@@ -1050,7 +1072,7 @@ class TestRequestCachedSetup(object):
                 assert arg1 == 11
         """
         )
-        result = testdir.runpytest("-v")
+        result = testdir.runpytest("-v", SHOW_PYTEST_WARNINGS_ARG)
         result.stdout.fnmatch_lines(["*1 passed*"])
 
     def test_request_cached_setup_functional(self, testdir):
@@ -1081,7 +1103,7 @@ class TestRequestCachedSetup(object):
                 assert test_0.values == [2]
         """
         )
-        result = testdir.runpytest("-v")
+        result = testdir.runpytest("-v", SHOW_PYTEST_WARNINGS_ARG)
         result.stdout.fnmatch_lines(["*3 passed*"])
 
     def test_issue117_sessionscopeteardown(self, testdir):
@@ -1100,7 +1122,7 @@ class TestRequestCachedSetup(object):
                 pass
         """
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
         assert result.ret != 0
         result.stdout.fnmatch_lines(["*3/x*", "*ZeroDivisionError*"])
 
@@ -1205,8 +1227,7 @@ class TestFixtureUsages(object):
         result = testdir.runpytest_inprocess()
         result.stdout.fnmatch_lines(
             (
-                "*ValueError: fixture badscope from test_invalid_scope.py has an unsupported"
-                " scope value 'functions'"
+                "*Fixture 'badscope' from test_invalid_scope.py got an unexpected scope value 'functions'"
             )
         )
 
@@ -1467,7 +1488,7 @@ class TestFixtureManagerParseFactories(object):
                     return "class"
                 def test_hello(self, item, fm):
                     faclist = fm.getfixturedefs("hello", item.nodeid)
-                    print (faclist)
+                    print(faclist)
                     assert len(faclist) == 3
 
                     assert faclist[0].func(item._request) == "conftest"
@@ -1484,41 +1505,41 @@ class TestFixtureManagerParseFactories(object):
         runner = testdir.mkdir("runner")
         package = testdir.mkdir("package")
         package.join("conftest.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
             import pytest
             @pytest.fixture
             def one():
                 return 1
-        """
+            """
             )
         )
         package.join("test_x.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            def test_x(one):
-                assert one == 1
-        """
+                def test_x(one):
+                    assert one == 1
+                """
             )
         )
         sub = package.mkdir("sub")
         sub.join("__init__.py").ensure()
         sub.join("conftest.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            import pytest
-            @pytest.fixture
-            def one():
-                return 2
-        """
+                import pytest
+                @pytest.fixture
+                def one():
+                    return 2
+                """
             )
         )
         sub.join("test_y.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            def test_x(one):
-                assert one == 2
-        """
+                def test_x(one):
+                    assert one == 2
+                """
             )
         )
         reprec = testdir.inline_run()
@@ -1535,44 +1556,44 @@ class TestFixtureManagerParseFactories(object):
         )
         package = testdir.mkdir("package")
         package.join("__init__.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            from .. import values
-            def setup_module():
-                values.append("package")
-            def teardown_module():
-                values[:] = []
-        """
+                from .. import values
+                def setup_module():
+                    values.append("package")
+                def teardown_module():
+                    values[:] = []
+                """
             )
         )
         package.join("test_x.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            from .. import values
-            def test_x():
-                assert values == ["package"]
-        """
+                from .. import values
+                def test_x():
+                    assert values == ["package"]
+                """
             )
         )
         package = testdir.mkdir("package2")
         package.join("__init__.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            from .. import values
-            def setup_module():
-                values.append("package2")
-            def teardown_module():
-                values[:] = []
-        """
+                from .. import values
+                def setup_module():
+                    values.append("package2")
+                def teardown_module():
+                    values[:] = []
+                """
             )
         )
         package.join("test_x.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            from .. import values
-            def test_x():
-                assert values == ["package2"]
-        """
+                from .. import values
+                def test_x():
+                    assert values == ["package2"]
+                """
             )
         )
         reprec = testdir.inline_run()
@@ -1584,35 +1605,36 @@ class TestFixtureManagerParseFactories(object):
             values = []
         """
         )
+        testdir.syspathinsert(testdir.tmpdir.dirname)
         package = testdir.mkdir("package")
         package.join("__init__.py").write("")
         package.join("conftest.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            import pytest
-            from .. import values
-            @pytest.fixture(scope="package")
-            def one():
-                values.append("package")
-                yield values
-                values.pop()
-            @pytest.fixture(scope="package", autouse=True)
-            def two():
-                values.append("package-auto")
-                yield values
-                values.pop()
-        """
+                import pytest
+                from .. import values
+                @pytest.fixture(scope="package")
+                def one():
+                    values.append("package")
+                    yield values
+                    values.pop()
+                @pytest.fixture(scope="package", autouse=True)
+                def two():
+                    values.append("package-auto")
+                    yield values
+                    values.pop()
+                """
             )
         )
         package.join("test_x.py").write(
-            dedent(
+            textwrap.dedent(
                 """\
-            from .. import values
-            def test_package_autouse():
-                assert values == ["package-auto"]
-            def test_package(one):
-                assert values == ["package-auto", "package"]
-        """
+                from .. import values
+                def test_package_autouse():
+                    assert values == ["package-auto"]
+                def test_package(one):
+                    assert values == ["package-auto", "package"]
+                """
             )
         )
         reprec = testdir.inline_run()
@@ -1804,24 +1826,24 @@ class TestAutouseManagement(object):
     def test_autouse_conftest_mid_directory(self, testdir):
         pkgdir = testdir.mkpydir("xyz123")
         pkgdir.join("conftest.py").write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                import pytest
+                @pytest.fixture(autouse=True)
+                def app():
+                    import sys
+                    sys._myapp = "hello"
                 """
-            import pytest
-            @pytest.fixture(autouse=True)
-            def app():
-                import sys
-                sys._myapp = "hello"
-        """
             )
         )
         t = pkgdir.ensure("tests", "test_app.py")
         t.write(
-            _pytest._code.Source(
+            textwrap.dedent(
+                """\
+                import sys
+                def test_app():
+                    assert sys._myapp == "hello"
                 """
-            import sys
-            def test_app():
-                assert sys._myapp == "hello"
-        """
             )
         )
         reprec = testdir.inline_run("-s")
@@ -1842,7 +1864,7 @@ class TestAutouseManagement(object):
                 yield f, -3
         """
         )
-        reprec = testdir.inline_run()
+        reprec = testdir.inline_run(SHOW_PYTEST_WARNINGS_ARG)
         reprec.assertoutcome(passed=2)
 
     def test_funcarg_and_setup(self, testdir):
@@ -2011,7 +2033,7 @@ class TestAutouseManagement(object):
                     values.append("step2-%d" % item)
 
             def test_finish():
-                print (values)
+                print(values)
                 assert values == ["setup-1", "step1-1", "step2-1", "teardown-1",
                              "setup-2", "step1-2", "step2-2", "teardown-2",]
         """
@@ -2322,7 +2344,7 @@ class TestFixtureMarker(object):
             """
             % method
         )
-        result = testdir.runpytest()
+        result = testdir.runpytest(SHOW_PYTEST_WARNINGS_ARG)
         assert result.ret != 0
         result.stdout.fnmatch_lines(
             ["*ScopeMismatch*You tried*function*session*request*"]
@@ -2715,17 +2737,17 @@ class TestFixtureMarker(object):
         )
         b = testdir.mkdir("subdir")
         b.join("test_overridden_fixture_finalizer.py").write(
-            dedent(
-                """
-            import pytest
-            @pytest.fixture
-            def browser(browser):
-                browser['visited'] = True
-                return browser
+            textwrap.dedent(
+                """\
+                import pytest
+                @pytest.fixture
+                def browser(browser):
+                    browser['visited'] = True
+                    return browser
 
-            def test_browser(browser):
-                assert browser['visited'] is True
-        """
+                def test_browser(browser):
+                    assert browser['visited'] is True
+                """
             )
         )
         reprec = testdir.runpytest("-s")
@@ -2851,7 +2873,7 @@ class TestFixtureMarker(object):
             def base(request, fix1):
                 def cleanup_base():
                     values.append("fin_base")
-                    print ("finalizing base")
+                    print("finalizing base")
                 request.addfinalizer(cleanup_base)
 
             def test_begin():
@@ -3217,120 +3239,119 @@ class TestShowFixtures(object):
 
     def test_show_fixtures_trimmed_doc(self, testdir):
         p = testdir.makepyfile(
-            dedent(
+            textwrap.dedent(
+                '''\
+                import pytest
+                @pytest.fixture
+                def arg1():
+                    """
+                    line1
+                    line2
+
+                    """
+                @pytest.fixture
+                def arg2():
+                    """
+                    line1
+                    line2
+
+                    """
                 '''
-            import pytest
-            @pytest.fixture
-            def arg1():
-                """
-                line1
-                line2
-
-                """
-            @pytest.fixture
-            def arg2():
-                """
-                line1
-                line2
-
-                """
-        '''
             )
         )
         result = testdir.runpytest("--fixtures", p)
         result.stdout.fnmatch_lines(
-            dedent(
+            textwrap.dedent(
+                """\
+                * fixtures defined from test_show_fixtures_trimmed_doc *
+                arg2
+                    line1
+                    line2
+                arg1
+                    line1
+                    line2
                 """
-            * fixtures defined from test_show_fixtures_trimmed_doc *
-            arg2
-                line1
-                line2
-            arg1
-                line1
-                line2
-
-        """
             )
         )
 
     def test_show_fixtures_indented_doc(self, testdir):
         p = testdir.makepyfile(
-            dedent(
+            textwrap.dedent(
+                '''\
+                import pytest
+                @pytest.fixture
+                def fixture1():
+                    """
+                    line1
+                        indented line
+                    """
                 '''
-            import pytest
-            @pytest.fixture
-            def fixture1():
-                """
-                line1
-                    indented line
-                """
-        '''
             )
         )
         result = testdir.runpytest("--fixtures", p)
         result.stdout.fnmatch_lines(
-            dedent(
+            textwrap.dedent(
+                """\
+                * fixtures defined from test_show_fixtures_indented_doc *
+                fixture1
+                    line1
+                        indented line
                 """
-            * fixtures defined from test_show_fixtures_indented_doc *
-            fixture1
-                line1
-                    indented line
-        """
             )
         )
 
     def test_show_fixtures_indented_doc_first_line_unindented(self, testdir):
         p = testdir.makepyfile(
-            dedent(
+            textwrap.dedent(
+                '''\
+                import pytest
+                @pytest.fixture
+                def fixture1():
+                    """line1
+                    line2
+                        indented line
+                    """
                 '''
-            import pytest
-            @pytest.fixture
-            def fixture1():
-                """line1
-                line2
-                    indented line
-                """
-        '''
             )
         )
         result = testdir.runpytest("--fixtures", p)
         result.stdout.fnmatch_lines(
-            dedent(
+            textwrap.dedent(
+                """\
+                * fixtures defined from test_show_fixtures_indented_doc_first_line_unindented *
+                fixture1
+                    line1
+                    line2
+                        indented line
                 """
-            * fixtures defined from test_show_fixtures_indented_doc_first_line_unindented *
-            fixture1
-                line1
-                line2
-                    indented line
-        """
             )
         )
 
     def test_show_fixtures_indented_in_class(self, testdir):
         p = testdir.makepyfile(
-            dedent(
+            textwrap.dedent(
+                '''\
+                import pytest
+                class TestClass(object):
+                    @pytest.fixture
+                    def fixture1(self):
+                        """line1
+                        line2
+                            indented line
+                        """
                 '''
-            import pytest
-            class TestClass(object):
-                @pytest.fixture
-                def fixture1(self):
-                    """line1
-                    line2
-                        indented line
-                    """
-        '''
             )
         )
         result = testdir.runpytest("--fixtures", p)
         result.stdout.fnmatch_lines(
-            dedent(
+            textwrap.dedent(
+                """\
+                * fixtures defined from test_show_fixtures_indented_in_class *
+                fixture1
+                    line1
+                    line2
+                        indented line
                 """
-            * fixtures defined from test_show_fixtures_indented_in_class *
-            fixture1
-                line1
-                line2
-                    indented line
-        """
             )
         )
 
@@ -3452,13 +3473,13 @@ class TestContextManagerFixtureFuncs(object):
             from test_context import fixture
             @fixture
             def arg1():
-                print ("setup")
+                print("setup")
                 yield 1
-                print ("teardown")
+                print("teardown")
             def test_1(arg1):
-                print ("test1", arg1)
+                print("test1", arg1)
             def test_2(arg1):
-                print ("test2", arg1)
+                print("test2", arg1)
                 assert 0
         """
         )
@@ -3481,13 +3502,13 @@ class TestContextManagerFixtureFuncs(object):
             from test_context import fixture
             @fixture(scope="module")
             def arg1():
-                print ("setup")
+                print("setup")
                 yield 1
-                print ("teardown")
+                print("teardown")
             def test_1(arg1):
-                print ("test1", arg1)
+                print("test1", arg1)
             def test_2(arg1):
-                print ("test2", arg1)
+                print("test2", arg1)
         """
         )
         result = testdir.runpytest("-s")
@@ -3595,15 +3616,15 @@ class TestParameterizedSubRequest(object):
         )
         result = testdir.runpytest()
         result.stdout.fnmatch_lines(
-            """
-            E*Failed: The requested fixture has no parameter defined for the current test.
-            E*
-            E*Requested fixture 'fix_with_param' defined in:
-            E*test_call_from_fixture.py:4
-            E*Requested here:
-            E*test_call_from_fixture.py:9
-            *1 error*
-            """
+            [
+                "The requested fixture has no parameter defined for test:",
+                "    test_call_from_fixture.py::test_foo",
+                "Requested fixture 'fix_with_param' defined in:",
+                "test_call_from_fixture.py:4",
+                "Requested here:",
+                "test_call_from_fixture.py:9",
+                "*1 error in*",
+            ]
         )
 
     def test_call_from_test(self, testdir):
@@ -3621,15 +3642,15 @@ class TestParameterizedSubRequest(object):
         )
         result = testdir.runpytest()
         result.stdout.fnmatch_lines(
-            """
-            E*Failed: The requested fixture has no parameter defined for the current test.
-            E*
-            E*Requested fixture 'fix_with_param' defined in:
-            E*test_call_from_test.py:4
-            E*Requested here:
-            E*test_call_from_test.py:8
-            *1 failed*
-            """
+            [
+                "The requested fixture has no parameter defined for test:",
+                "    test_call_from_test.py::test_foo",
+                "Requested fixture 'fix_with_param' defined in:",
+                "test_call_from_test.py:4",
+                "Requested here:",
+                "test_call_from_test.py:8",
+                "*1 failed*",
+            ]
         )
 
     def test_external_fixture(self, testdir):
@@ -3651,15 +3672,16 @@ class TestParameterizedSubRequest(object):
         )
         result = testdir.runpytest()
         result.stdout.fnmatch_lines(
-            """
-            E*Failed: The requested fixture has no parameter defined for the current test.
-            E*
-            E*Requested fixture 'fix_with_param' defined in:
-            E*conftest.py:4
-            E*Requested here:
-            E*test_external_fixture.py:2
-            *1 failed*
-            """
+            [
+                "The requested fixture has no parameter defined for test:",
+                "    test_external_fixture.py::test_foo",
+                "",
+                "Requested fixture 'fix_with_param' defined in:",
+                "conftest.py:4",
+                "Requested here:",
+                "test_external_fixture.py:2",
+                "*1 failed*",
+            ]
         )
 
     def test_non_relative_path(self, testdir):
@@ -3667,26 +3689,26 @@ class TestParameterizedSubRequest(object):
         fixdir = testdir.mkdir("fixtures")
         fixfile = fixdir.join("fix.py")
         fixfile.write(
-            _pytest._code.Source(
-                """
-            import pytest
+            textwrap.dedent(
+                """\
+                import pytest
 
-            @pytest.fixture(params=[0, 1, 2])
-            def fix_with_param(request):
-                return request.param
-            """
+                @pytest.fixture(params=[0, 1, 2])
+                def fix_with_param(request):
+                    return request.param
+                """
             )
         )
 
         testfile = tests_dir.join("test_foos.py")
         testfile.write(
-            _pytest._code.Source(
-                """
-            from fix import fix_with_param
+            textwrap.dedent(
+                """\
+                from fix import fix_with_param
 
-            def test_foo(request):
-                request.getfixturevalue('fix_with_param')
-            """
+                def test_foo(request):
+                    request.getfixturevalue('fix_with_param')
+                """
             )
         )
 
@@ -3694,15 +3716,16 @@ class TestParameterizedSubRequest(object):
         testdir.syspathinsert(fixdir)
         result = testdir.runpytest()
         result.stdout.fnmatch_lines(
-            """
-            E*Failed: The requested fixture has no parameter defined for the current test.
-            E*
-            E*Requested fixture 'fix_with_param' defined in:
-            E*fix.py:5
-            E*Requested here:
-            E*test_foos.py:5
-            *1 failed*
-            """
+            [
+                "The requested fixture has no parameter defined for test:",
+                "    test_foos.py::test_foo",
+                "",
+                "Requested fixture 'fix_with_param' defined in:",
+                "*fix.py:4",
+                "Requested here:",
+                "test_foos.py:4",
+                "*1 failed*",
+            ]
         )
 
 
@@ -3979,3 +4002,71 @@ class TestScopeOrdering(object):
         items, _ = testdir.inline_genitems()
         request = FixtureRequest(items[0])
         assert request.fixturenames == "s1 p1 m1 m2 c1 f2 f1".split()
+
+    def test_multiple_packages(self, testdir):
+        """Complex test involving multiple package fixtures. Make sure teardowns
+        are executed in order.
+        .
+        └── root
+            ├── __init__.py
+            ├── sub1
+            │   ├── __init__.py
+            │   ├── conftest.py
+            │   └── test_1.py
+            └── sub2
+                ├── __init__.py
+                ├── conftest.py
+                └── test_2.py
+        """
+        root = testdir.mkdir("root")
+        root.join("__init__.py").write("values = []")
+        sub1 = root.mkdir("sub1")
+        sub1.ensure("__init__.py")
+        sub1.join("conftest.py").write(
+            textwrap.dedent(
+                """\
+            import pytest
+            from .. import values
+            @pytest.fixture(scope="package")
+            def fix():
+                values.append("pre-sub1")
+                yield values
+                assert values.pop() == "pre-sub1"
+        """
+            )
+        )
+        sub1.join("test_1.py").write(
+            textwrap.dedent(
+                """\
+            from .. import values
+            def test_1(fix):
+                assert values == ["pre-sub1"]
+        """
+            )
+        )
+        sub2 = root.mkdir("sub2")
+        sub2.ensure("__init__.py")
+        sub2.join("conftest.py").write(
+            textwrap.dedent(
+                """\
+            import pytest
+            from .. import values
+            @pytest.fixture(scope="package")
+            def fix():
+                values.append("pre-sub2")
+                yield values
+                assert values.pop() == "pre-sub2"
+        """
+            )
+        )
+        sub2.join("test_2.py").write(
+            textwrap.dedent(
+                """\
+            from .. import values
+            def test_2(fix):
+                assert values == ["pre-sub2"]
+        """
+            )
+        )
+        reprec = testdir.inline_run()
+        reprec.assertoutcome(passed=2)

@@ -1,28 +1,30 @@
 """
 python version compatibility code
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import codecs
 import functools
 import inspect
 import re
 import sys
+from contextlib import contextmanager
 
 import py
+import six
+from six import text_type
 
 import _pytest
+from _pytest.outcomes import fail
 from _pytest.outcomes import TEST_OUTCOME
-from six import text_type
-import six
 
 try:
     import enum
 except ImportError:  # pragma: no cover
     # Only available in Python 3.4+ or as a backport
     enum = None
-
-__all__ = ["Path"]
 
 _PY3 = sys.version_info > (3, 0)
 _PY2 = not _PY3
@@ -40,11 +42,6 @@ PY35 = sys.version_info[:2] >= (3, 5)
 PY36 = sys.version_info[:2] >= (3, 6)
 MODULE_NOT_FOUND_ERROR = "ModuleNotFoundError" if PY36 else "ImportError"
 
-if PY36:
-    from pathlib import Path
-else:
-    from pathlib2 import Path
-
 
 if _PY3:
     from collections.abc import MutableMapping as MappingMixin
@@ -53,6 +50,14 @@ else:
     # those raise DeprecationWarnings in Python >=3.7
     from collections import MutableMapping as MappingMixin  # noqa
     from collections import Mapping, Sequence  # noqa
+
+
+if sys.version_info >= (3, 4):
+    from importlib.util import spec_from_file_location
+else:
+
+    def spec_from_file_location(*_, **__):
+        return None
 
 
 def _format_args(func):
@@ -129,9 +134,17 @@ def getfuncargnames(function, is_method=False, cls=None):
     # ordered mapping of parameter names to Parameter instances.  This
     # creates a tuple of the names of the parameters that don't have
     # defaults.
+    try:
+        parameters = signature(function).parameters
+    except (ValueError, TypeError) as e:
+        fail(
+            "Could not determine arguments of {!r}: {}".format(function, e),
+            pytrace=False,
+        )
+
     arg_names = tuple(
         p.name
-        for p in signature(function).parameters.values()
+        for p in parameters.values()
         if (
             p.kind is Parameter.POSITIONAL_OR_KEYWORD
             or p.kind is Parameter.KEYWORD_ONLY
@@ -149,6 +162,13 @@ def getfuncargnames(function, is_method=False, cls=None):
     if hasattr(function, "__wrapped__"):
         arg_names = arg_names[num_mock_patch_args(function) :]
     return arg_names
+
+
+@contextmanager
+def dummy_context_manager():
+    """Context manager that does nothing, useful in situations where you might need an actual context manager or not
+    depending on some condition. Using this allow to keep the same code"""
+    yield
 
 
 def get_default_arg_names(function):
@@ -228,19 +248,38 @@ else:
             return val.encode("unicode-escape")
 
 
+class _PytestWrapper(object):
+    """Dummy wrapper around a function object for internal use only.
+
+    Used to correctly unwrap the underlying function object
+    when we are creating fixtures, because we wrap the function object ourselves with a decorator
+    to issue warnings when the fixture function is called directly.
+    """
+
+    def __init__(self, obj):
+        self.obj = obj
+
+
 def get_real_func(obj):
     """ gets the real function object of the (possibly) wrapped object by
     functools.wraps or functools.partial.
     """
     start_obj = obj
     for i in range(100):
+        # __pytest_wrapped__ is set by @pytest.fixture when wrapping the fixture function
+        # to trigger a warning if it gets called directly instead of by pytest: we don't
+        # want to unwrap further than this otherwise we lose useful wrappings like @mock.patch (#3774)
+        new_obj = getattr(obj, "__pytest_wrapped__", None)
+        if isinstance(new_obj, _PytestWrapper):
+            obj = new_obj.obj
+            break
         new_obj = getattr(obj, "__wrapped__", None)
         if new_obj is None:
             break
         obj = new_obj
     else:
         raise ValueError(
-            ("could not find real function of {start}" "\nstopped at {current}").format(
+            ("could not find real function of {start}\nstopped at {current}").format(
                 start=py.io.saferepr(start_obj), current=py.io.saferepr(obj)
             )
         )
@@ -293,6 +332,14 @@ def safe_getattr(object, name, default):
         return getattr(object, name, default)
     except TEST_OUTCOME:
         return default
+
+
+def safe_isclass(obj):
+    """Ignore any exception via isinstance on Python 3."""
+    try:
+        return isclass(obj)
+    except Exception:
+        return False
 
 
 def _is_unittest_unexpected_success_a_failure():
@@ -381,3 +428,16 @@ class FuncargnamesCompatAttr(object):
     def funcargnames(self):
         """ alias attribute for ``fixturenames`` for pre-2.3 compatibility"""
         return self.fixturenames
+
+
+if six.PY2:
+
+    def lru_cache(*_, **__):
+        def dec(fn):
+            return fn
+
+        return dec
+
+
+else:
+    from functools import lru_cache  # noqa: F401

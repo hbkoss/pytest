@@ -33,12 +33,14 @@ Full pytest documentation
    reference
 
    goodpractices
+   flaky
    pythonpath
    customize
    example/index
    bash-completion
 
    backwards-compatibility
+   deprecations
    historical-notes
    license
    contributing

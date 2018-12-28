@@ -43,7 +43,9 @@ First, let's create 50 test invocation of which only 2 fail::
         if i in (17, 25):
            pytest.fail("bad luck")
 
-If you run this for the first time you will see two failures::
+If you run this for the first time you will see two failures:
+
+.. code-block:: pytest
 
     $ pytest -q
     .................F.......F........................                   [100%]
@@ -72,11 +74,13 @@ If you run this for the first time you will see two failures::
     test_50.py:6: Failed
     2 failed, 48 passed in 0.12 seconds
 
-If you then run it with ``--lf``::
+If you then run it with ``--lf``:
+
+.. code-block:: pytest
 
     $ pytest --lf
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR, inifile:
     collected 50 items / 48 deselected
     run-last-failure: rerun previous 2 failures
@@ -113,11 +117,13 @@ not been run ("deselected").
 
 Now, if you run with the ``--ff`` option, all tests will be run but the first
 previous failures will be executed first (as can be seen from the series
-of ``FF`` and dots)::
+of ``FF`` and dots):
+
+.. code-block:: pytest
 
     $ pytest --ff
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR, inifile:
     collected 50 items
     run-last-failure: rerun previous 2 failures first
@@ -179,11 +185,14 @@ across pytest invocations::
     import pytest
     import time
 
+    def expensive_computation():
+        print("running expensive computation...")
+
     @pytest.fixture
     def mydata(request):
         val = request.config.cache.get("example/value", None)
         if val is None:
-            time.sleep(9*0.6) # expensive computation :)
+            expensive_computation()
             val = 42
             request.config.cache.set("example/value", val)
         return val
@@ -191,8 +200,9 @@ across pytest invocations::
     def test_function(mydata):
         assert mydata == 23
 
-If you run this command once, it will take a while because
-of the sleep::
+If you run this command for the first time, you can see the print statement:
+
+.. code-block:: pytest
 
     $ pytest -q
     F                                                                    [100%]
@@ -209,7 +219,9 @@ of the sleep::
     1 failed in 0.12 seconds
 
 If you run it a second time the value will be retrieved from
-the cache and this will be quick::
+the cache and nothing will be printed:
+
+.. code-block:: pytest
 
     $ pytest -q
     F                                                                    [100%]
@@ -232,11 +244,13 @@ Inspecting Cache content
 -------------------------------
 
 You can always peek at the content of the cache using the
-``--cache-show`` command line option::
+``--cache-show`` command line option:
+
+.. code-block:: pytest
 
     $ pytest --cache-show
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR, inifile:
     cachedir: $REGENDOC_TMPDIR/.pytest_cache
     ------------------------------- cache values -------------------------------
@@ -244,6 +258,8 @@ You can always peek at the content of the cache using the
       {'test_caching.py::test_function': True}
     cache/nodeids contains:
       ['test_caching.py::test_function']
+    cache/stepwise contains:
+      []
     example/value contains:
       42
 
@@ -260,3 +276,9 @@ by adding the ``--cache-clear`` option like this::
 This is recommended for invocations from Continuous Integration
 servers where isolation and correctness is more important
 than speed.
+
+
+Stepwise
+--------
+
+As an alternative to ``--lf -x``, especially for cases where you expect a large part of the test suite will fail, ``--sw``, ``--stepwise`` allows you to fix them one at a time. The test suite will run until the first failure and then stop. At the next invocation, tests will continue from the last failing test and then run until the next failing test. You may use the ``--stepwise-skip`` option to ignore one failing test and stop the test execution on the second failing test instead. This is useful if you get stuck on a failing test and just want to ignore it until later.

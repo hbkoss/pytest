@@ -1,6 +1,12 @@
-import six
-import warnings
 import argparse
+import sys as _sys
+import warnings
+from gettext import gettext as _
+
+import py
+import six
+
+from ..main import EXIT_USAGEERROR
 
 FILE_OR_DIR = "file_or_dir"
 
@@ -70,7 +76,8 @@ class Parser(object):
 
         self.optparser = self._getparser()
         try_argcomplete(self.optparser)
-        return self.optparser.parse_args([str(x) for x in args], namespace=namespace)
+        args = [str(x) if isinstance(x, py.path.local) else x for x in args]
+        return self.optparser.parse_args(args, namespace=namespace)
 
     def _getparser(self):
         from _pytest._argcomplete import filescompleter
@@ -106,7 +113,7 @@ class Parser(object):
         the remaining arguments unknown at this point.
         """
         optparser = self._getparser()
-        args = [str(x) for x in args]
+        args = [str(x) if isinstance(x, py.path.local) else x for x in args]
         return optparser.parse_known_args(args, namespace=namespace)
 
     def addini(self, name, help, type=None, default=None):
@@ -145,7 +152,7 @@ class ArgumentError(Exception):
 class Argument(object):
     """class that mimics the necessary behaviour of optparse.Option
 
-    its currently a least effort implementation
+    it's currently a least effort implementation
     and ignoring choices and integer prefixes
     https://docs.python.org/3/library/optparse.html#optparse-standard-option-types
     """
@@ -174,23 +181,23 @@ class Argument(object):
             if isinstance(typ, six.string_types):
                 if typ == "choice":
                     warnings.warn(
-                        "type argument to addoption() is a string %r."
-                        " For parsearg this is optional and when supplied"
-                        " should be a type."
+                        "`type` argument to addoption() is the string %r."
+                        " For choices this is optional and can be omitted, "
+                        " but when supplied should be a type (for example `str` or `int`)."
                         " (options: %s)" % (typ, names),
                         DeprecationWarning,
-                        stacklevel=3,
+                        stacklevel=4,
                     )
                     # argparse expects a type here take it from
                     # the type of the first element
                     attrs["type"] = type(attrs["choices"][0])
                 else:
                     warnings.warn(
-                        "type argument to addoption() is a string %r."
-                        " For parsearg this should be a type."
+                        "`type` argument to addoption() is the string %r, "
+                        " but when supplied should be a type (for example `str` or `int`)."
                         " (options: %s)" % (typ, names),
                         DeprecationWarning,
-                        stacklevel=3,
+                        stacklevel=4,
                     )
                     attrs["type"] = Argument._typ_map[typ]
                 # used in test_parseopt -> test_parse_defaultgetter
@@ -325,6 +332,16 @@ class MyOptionParser(argparse.ArgumentParser):
         # extra_info is a dict of (param -> value) to display if there's
         # an usage error to provide more contextual information to the user
         self.extra_info = extra_info
+
+    def error(self, message):
+        """error(message: string)
+
+        Prints a usage message incorporating the message to stderr and
+        exits.
+        Overrides the method in parent class to change exit code"""
+        self.print_usage(_sys.stderr)
+        args = {"prog": self.prog, "message": message}
+        self.exit(EXIT_USAGEERROR, _("%(prog)s: error: %(message)s\n") % args)
 
     def parse_args(self, args=None, namespace=None):
         """allow splitting of positional arguments"""

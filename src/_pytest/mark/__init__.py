@@ -1,18 +1,20 @@
 """ generic mechanism for marking and selecting python functions. """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+from .legacy import matchkeyword
+from .legacy import matchmark
+from .structures import EMPTY_PARAMETERSET_OPTION
+from .structures import get_empty_parameterset_mark
+from .structures import Mark
+from .structures import MARK_GEN
+from .structures import MarkDecorator
+from .structures import MarkGenerator
+from .structures import MarkInfo
+from .structures import ParameterSet
+from .structures import transfer_markers
 from _pytest.config import UsageError
-from .structures import (
-    ParameterSet,
-    EMPTY_PARAMETERSET_OPTION,
-    MARK_GEN,
-    Mark,
-    MarkInfo,
-    MarkDecorator,
-    MarkGenerator,
-    transfer_markers,
-    get_empty_parameterset_mark,
-)
-from .legacy import matchkeyword, matchmark
 
 __all__ = [
     "Mark",
@@ -22,11 +24,6 @@ __all__ = [
     "transfer_markers",
     "get_empty_parameterset_mark",
 ]
-
-
-class MarkerError(Exception):
-
-    """Error in use of a pytest marker/attribute."""
 
 
 def param(*values, **kw):
@@ -163,9 +160,9 @@ def pytest_configure(config):
 
     empty_parameterset = config.getini(EMPTY_PARAMETERSET_OPTION)
 
-    if empty_parameterset not in ("skip", "xfail", None, ""):
+    if empty_parameterset not in ("skip", "xfail", "fail_at_collect", None, ""):
         raise UsageError(
-            "{!s} must be one of skip and xfail,"
+            "{!s} must be one of skip, xfail or fail_at_collect"
             " but it is {!r}".format(EMPTY_PARAMETERSET_OPTION, empty_parameterset)
         )
 

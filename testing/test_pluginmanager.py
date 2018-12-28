@@ -1,13 +1,18 @@
 # encoding: UTF-8
-from __future__ import absolute_import, division, print_function
-import pytest
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
 import re
 import sys
 import types
 
-from _pytest.config import get_config, PytestPluginManager
-from _pytest.main import EXIT_NOTESTSCOLLECTED, Session
+import pytest
+from _pytest.config import get_config
+from _pytest.config import PytestPluginManager
+from _pytest.main import EXIT_NOTESTSCOLLECTED
+from _pytest.main import Session
 
 
 @pytest.fixture
@@ -25,7 +30,6 @@ class TestPytestPluginInteractions(object):
         )
         conf = testdir.makeconftest(
             """
-            import sys ; sys.path.insert(0, '.')
             import newhooks
             def pytest_addhooks(pluginmanager):
                 pluginmanager.addhooks(newhooks)
@@ -263,8 +267,7 @@ class TestPytestPluginManager(object):
         mod.pytest_plugins = "pytest_a"
         aplugin = testdir.makepyfile(pytest_a="#")
         reprec = testdir.make_hook_recorder(pytestpm)
-        # syspath.prepend(aplugin.dirpath())
-        sys.path.insert(0, str(aplugin.dirpath()))
+        testdir.syspathinsert(aplugin.dirpath())
         pytestpm.consider_module(mod)
         call = reprec.getcall(pytestpm.hook.pytest_plugin_registered.name)
         assert call.plugin.__name__ == "pytest_a"
@@ -377,3 +380,21 @@ class TestPytestPluginManagerBootstrapming(object):
         pytestpm.consider_preparse(["xyz", "-p", "no:abc"])
         l2 = pytestpm.get_plugins()
         assert 42 not in l2
+
+    def test_plugin_prevent_register_stepwise_on_cacheprovider_unregister(
+        self, pytestpm
+    ):
+        """ From PR #4304 : The only way to unregister a module is documented at
+        the end of https://docs.pytest.org/en/latest/plugins.html.
+
+        When unregister cacheprovider, then unregister stepwise too
+        """
+        pytestpm.register(42, name="cacheprovider")
+        pytestpm.register(43, name="stepwise")
+        l1 = pytestpm.get_plugins()
+        assert 42 in l1
+        assert 43 in l1
+        pytestpm.consider_preparse(["xyz", "-p", "no:cacheprovider"])
+        l2 = pytestpm.get_plugins()
+        assert 42 not in l2
+        assert 43 not in l2

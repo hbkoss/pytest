@@ -1,10 +1,17 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import pprint
 import sys
-import pytest
+import textwrap
 
-import _pytest._code
-from _pytest.main import Session, EXIT_NOTESTSCOLLECTED, _in_venv
+import py
+
+import pytest
+from _pytest.main import _in_venv
+from _pytest.main import EXIT_NOTESTSCOLLECTED
+from _pytest.main import Session
 
 
 class TestCollector(object):
@@ -505,13 +512,8 @@ class TestSession(object):
                     pass
         """
         )
-        normid = p.basename + "::TestClass::()::test_method"
-        for id in [
-            p.basename,
-            p.basename + "::TestClass",
-            p.basename + "::TestClass::()",
-            normid,
-        ]:
+        normid = p.basename + "::TestClass::test_method"
+        for id in [p.basename, p.basename + "::TestClass", normid]:
             items, hookrec = testdir.inline_genitems(id)
             assert len(items) == 1
             assert items[0].name == "test_method"
@@ -620,7 +622,7 @@ class TestSession(object):
         items, hookrec = testdir.inline_genitems(arg)
         assert len(items) == 1
         item, = items
-        assert item.nodeid.endswith("TestClass::()::test_method")
+        assert item.nodeid.endswith("TestClass::test_method")
         # ensure we are reporting the collection of the single test item (#2464)
         assert [x.name for x in self.get_reported_items(hookrec)] == ["test_method"]
 
@@ -638,6 +640,10 @@ class Test_getinitialnodes(object):
             assert col.config is config
 
     def test_pkgfile(self, testdir):
+        """Verify nesting when a module is within a package.
+        The parent chain should match: Module<x.py> -> Package<subdir> -> Session.
+            Session's parent should always be None.
+        """
         tmpdir = testdir.tmpdir
         subdir = tmpdir.join("subdir")
         x = subdir.ensure("x.py")
@@ -645,9 +651,12 @@ class Test_getinitialnodes(object):
         with subdir.as_cwd():
             config = testdir.parseconfigure(x)
         col = testdir.getnode(config, x)
-        assert isinstance(col, pytest.Module)
         assert col.name == "x.py"
-        assert col.parent.parent is None
+        assert isinstance(col, pytest.Module)
+        assert isinstance(col.parent, pytest.Package)
+        assert isinstance(col.parent.parent, pytest.Session)
+        # session is batman (has no parents)
+        assert col.parent.parent.parent is None
         for col in col.listchain():
             assert col.config is config
 
@@ -906,13 +915,13 @@ def test_fixture_scope_sibling_conftests(testdir):
     """Regression test case for https://github.com/pytest-dev/pytest/issues/2836"""
     foo_path = testdir.mkdir("foo")
     foo_path.join("conftest.py").write(
-        _pytest._code.Source(
+        textwrap.dedent(
+            """\
+            import pytest
+            @pytest.fixture
+            def fix():
+                return 1
             """
-        import pytest
-        @pytest.fixture
-        def fix():
-            return 1
-    """
         )
     )
     foo_path.join("test_foo.py").write("def test_foo(fix): assert fix == 1")
@@ -931,3 +940,221 @@ def test_fixture_scope_sibling_conftests(testdir):
             "*1 passed, 1 error*",
         ]
     )
+
+
+def test_collect_init_tests(testdir):
+    """Check that we collect files from __init__.py files when they patch the 'python_files' (#3773)"""
+    p = testdir.copy_example("collect/collect_init_tests")
+    result = testdir.runpytest(p, "--collect-only")
+    result.stdout.fnmatch_lines(
+        [
+            "collected 2 items",
+            "<Package *",
+            "  <Module '__init__.py'>",
+            "    <Function 'test_init'>",
+            "  <Module 'test_foo.py'>",
+            "    <Function 'test_foo'>",
+        ]
+    )
+    result = testdir.runpytest("./tests", "--collect-only")
+    result.stdout.fnmatch_lines(
+        [
+            "collected 2 items",
+            "<Package *",
+            "  <Module '__init__.py'>",
+            "    <Function 'test_init'>",
+            "  <Module 'test_foo.py'>",
+            "    <Function 'test_foo'>",
+        ]
+    )
+    # Ignores duplicates with "." and pkginit (#4310).
+    result = testdir.runpytest("./tests", ".", "--collect-only")
+    result.stdout.fnmatch_lines(
+        [
+            "collected 2 items",
+            "<Package */tests'>",
+            "  <Module '__init__.py'>",
+            "    <Function 'test_init'>",
+            "  <Module 'test_foo.py'>",
+            "    <Function 'test_foo'>",
+        ]
+    )
+    # Same as before, but different order.
+    result = testdir.runpytest(".", "tests", "--collect-only")
+    result.stdout.fnmatch_lines(
+        [
+            "collected 2 items",
+            "<Package */tests'>",
+            "  <Module '__init__.py'>",
+            "    <Function 'test_init'>",
+            "  <Module 'test_foo.py'>",
+            "    <Function 'test_foo'>",
+        ]
+    )
+    result = testdir.runpytest("./tests/test_foo.py", "--collect-only")
+    result.stdout.fnmatch_lines(
+        ["<Package */tests'>", "  <Module 'test_foo.py'>", "    <Function 'test_foo'>"]
+    )
+    assert "test_init" not in result.stdout.str()
+    result = testdir.runpytest("./tests/__init__.py", "--collect-only")
+    result.stdout.fnmatch_lines(
+        ["<Package */tests'>", "  <Module '__init__.py'>", "    <Function 'test_init'>"]
+    )
+    assert "test_foo" not in result.stdout.str()
+
+
+def test_collect_invalid_signature_message(testdir):
+    """Check that we issue a proper message when we can't determine the signature of a test
+    function (#4026).
+    """
+    testdir.makepyfile(
+        """
+        import pytest
+
+        class TestCase:
+            @pytest.fixture
+            def fix():
+                pass
+    """
+    )
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(
+        ["Could not determine arguments of *.fix *: invalid method signature"]
+    )
+
+
+def test_collect_handles_raising_on_dunder_class(testdir):
+    """Handle proxy classes like Django's LazySettings that might raise on
+    ``isinstance`` (#4266).
+    """
+    testdir.makepyfile(
+        """
+        class ImproperlyConfigured(Exception):
+            pass
+
+        class RaisesOnGetAttr(object):
+            def raises(self):
+                raise ImproperlyConfigured
+
+            __class__ = property(raises)
+
+        raises = RaisesOnGetAttr()
+
+
+        def test_1():
+            pass
+    """
+    )
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["*1 passed in*"])
+    assert result.ret == 0
+
+
+def test_collect_with_chdir_during_import(testdir):
+    subdir = testdir.tmpdir.mkdir("sub")
+    testdir.tmpdir.join("conftest.py").write(
+        textwrap.dedent(
+            """
+            import os
+            os.chdir(%r)
+            """
+            % (str(subdir),)
+        )
+    )
+    testdir.makepyfile(
+        """
+        def test_1():
+            import os
+            assert os.getcwd() == %r
+        """
+        % (str(subdir),)
+    )
+    with testdir.tmpdir.as_cwd():
+        result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["*1 passed in*"])
+    assert result.ret == 0
+
+    # Handles relative testpaths.
+    testdir.makeini(
+        """
+        [pytest]
+        testpaths = .
+    """
+    )
+    with testdir.tmpdir.as_cwd():
+        result = testdir.runpytest("--collect-only")
+    result.stdout.fnmatch_lines(["collected 1 item"])
+
+
+def test_collect_pyargs_with_testpaths(testdir, monkeypatch):
+    testmod = testdir.mkdir("testmod")
+    # NOTE: __init__.py is not collected since it does not match python_files.
+    testmod.ensure("__init__.py").write("def test_func(): pass")
+    testmod.ensure("test_file.py").write("def test_func(): pass")
+
+    root = testdir.mkdir("root")
+    root.ensure("pytest.ini").write(
+        textwrap.dedent(
+            """
+        [pytest]
+        addopts = --pyargs
+        testpaths = testmod
+    """
+        )
+    )
+    monkeypatch.setenv("PYTHONPATH", str(testdir.tmpdir))
+    with root.as_cwd():
+        result = testdir.runpytest_subprocess()
+    result.stdout.fnmatch_lines(["*1 passed in*"])
+
+
+@pytest.mark.skipif(
+    not hasattr(py.path.local, "mksymlinkto"),
+    reason="symlink not available on this platform",
+)
+def test_collect_symlink_file_arg(testdir):
+    """Test that collecting a direct symlink, where the target does not match python_files works (#4325)."""
+    real = testdir.makepyfile(
+        real="""
+        def test_nodeid(request):
+            assert request.node.nodeid == "real.py::test_nodeid"
+        """
+    )
+    symlink = testdir.tmpdir.join("symlink.py")
+    symlink.mksymlinkto(real)
+    result = testdir.runpytest("-v", symlink)
+    result.stdout.fnmatch_lines(["real.py::test_nodeid PASSED*", "*1 passed in*"])
+    assert result.ret == 0
+
+
+@pytest.mark.skipif(
+    not hasattr(py.path.local, "mksymlinkto"),
+    reason="symlink not available on this platform",
+)
+def test_collect_symlink_out_of_tree(testdir):
+    """Test collection of symlink via out-of-tree rootdir."""
+    sub = testdir.tmpdir.join("sub")
+    real = sub.join("test_real.py")
+    real.write(
+        textwrap.dedent(
+            """
+        def test_nodeid(request):
+            # Should not contain sub/ prefix.
+            assert request.node.nodeid == "test_real.py::test_nodeid"
+        """
+        ),
+        ensure=True,
+    )
+
+    out_of_tree = testdir.tmpdir.join("out_of_tree").ensure(dir=True)
+    symlink_to_sub = out_of_tree.join("symlink_to_sub")
+    symlink_to_sub.mksymlinkto(sub)
+    sub.chdir()
+    result = testdir.runpytest("-vs", "--rootdir=%s" % sub, symlink_to_sub)
+    result.stdout.fnmatch_lines(
+        [
+            # Should not contain "sub/"!
+            "test_real.py::test_nodeid PASSED"
+        ]
+    )
+    assert result.ret == 0

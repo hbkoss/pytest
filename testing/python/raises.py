@@ -1,6 +1,9 @@
-from _pytest.outcomes import Failed
-import pytest
 import sys
+
+import six
+
+import pytest
+from _pytest.outcomes import Failed
 
 
 class TestRaises(object):
@@ -13,6 +16,10 @@ class TestRaises(object):
 
     def test_raises_exec(self):
         pytest.raises(ValueError, "a,x = []")
+
+    def test_raises_exec_correct_filename(self):
+        excinfo = pytest.raises(ValueError, 'int("s")')
+        assert __file__ in excinfo.traceback[-1].path
 
     def test_raises_syntax_error(self):
         pytest.raises(SyntaxError, "qwe qwe qwe")
@@ -30,6 +37,28 @@ class TestRaises(object):
         except pytest.raises.Exception:
             pass
 
+    def test_raises_falsey_type_error(self):
+        with pytest.raises(TypeError):
+            with pytest.raises(AssertionError, match=0):
+                raise AssertionError("ohai")
+
+    def test_raises_repr_inflight(self):
+        """Ensure repr() on an exception info inside a pytest.raises with block works (#4386)"""
+
+        class E(Exception):
+            pass
+
+        with pytest.raises(E) as excinfo:
+            # this test prints the inflight uninitialized object
+            # using repr and str as well as pprint to demonstrate
+            # it works
+            print(str(excinfo))
+            print(repr(excinfo))
+            import pprint
+
+            pprint.pprint(excinfo)
+            raise E()
+
     def test_raises_as_contextmanager(self, testdir):
         testdir.makepyfile(
             """
@@ -40,7 +69,7 @@ class TestRaises(object):
                 with pytest.raises(ZeroDivisionError) as excinfo:
                     assert isinstance(excinfo, _pytest._code.ExceptionInfo)
                     1/0
-                print (excinfo)
+                print(excinfo)
                 assert excinfo.type == ZeroDivisionError
                 assert isinstance(excinfo.value, ZeroDivisionError)
 
@@ -166,6 +195,29 @@ class TestRaises(object):
             pass
 
         with pytest.raises(
-            Failed, match="DID NOT RAISE <class 'raises.ClassLooksIterableException'>"
+            Failed,
+            match=r"DID NOT RAISE <class 'raises(\..*)*ClassLooksIterableException'>",
         ):
             pytest.raises(ClassLooksIterableException, lambda: None)
+
+    def test_raises_with_raising_dunder_class(self):
+        """Test current behavior with regard to exceptions via __class__ (#4284)."""
+
+        class CrappyClass(Exception):
+            @property
+            def __class__(self):
+                assert False, "via __class__"
+
+        if six.PY2:
+            with pytest.raises(pytest.fail.Exception) as excinfo:
+                with pytest.raises(CrappyClass()):
+                    pass
+            assert "DID NOT RAISE" in excinfo.value.args[0]
+
+            with pytest.raises(CrappyClass) as excinfo:
+                raise CrappyClass()
+        else:
+            with pytest.raises(AssertionError) as excinfo:
+                with pytest.raises(CrappyClass()):
+                    pass
+            assert "via __class__" in excinfo.value.args[0]

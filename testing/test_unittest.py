@@ -1,7 +1,11 @@
-from __future__ import absolute_import, division, print_function
-from _pytest.main import EXIT_NOTESTSCOLLECTED
-import pytest
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import gc
+
+import pytest
+from _pytest.main import EXIT_NOTESTSCOLLECTED
 
 
 def test_simple_unittest(testdir):
@@ -240,7 +244,7 @@ def test_setup_failure_is_shown(testdir):
             def setUp(self):
                 assert 0, "down1"
             def test_method(self):
-                print ("never42")
+                print("never42")
                 xyz
     """
     )
@@ -606,14 +610,14 @@ def test_djangolike_testcase(testdir):
         class DjangoLikeTestCase(TestCase):
 
             def setUp(self):
-                print ("setUp()")
+                print("setUp()")
 
             def test_presetup_has_been_run(self):
-                print ("test_thing()")
+                print("test_thing()")
                 self.assertTrue(hasattr(self, 'was_presetup'))
 
             def tearDown(self):
-                print ("tearDown()")
+                print("tearDown()")
 
             def __call__(self, result=None):
                 try:
@@ -635,11 +639,11 @@ def test_djangolike_testcase(testdir):
                     return
 
             def _pre_setup(self):
-                print ("_pre_setup()")
+                print("_pre_setup()")
                 self.was_presetup = True
 
             def _post_teardown(self):
-                print ("_post_teardown()")
+                print("_post_teardown()")
     """
     )
     result = testdir.runpytest("-s")
@@ -989,3 +993,36 @@ def test_usefixtures_marker_on_unittest(base, testdir):
 
     result = testdir.runpytest("-s")
     result.assert_outcomes(passed=2)
+
+
+def test_testcase_handles_init_exceptions(testdir):
+    """
+    Regression test to make sure exceptions in the __init__ method are bubbled up correctly.
+    See https://github.com/pytest-dev/pytest/issues/3788
+    """
+    testdir.makepyfile(
+        """
+        from unittest import TestCase
+        import pytest
+        class MyTestCase(TestCase):
+            def __init__(self, *args, **kwargs):
+                raise Exception("should raise this exception")
+            def test_hello(self):
+                pass
+    """
+    )
+    result = testdir.runpytest()
+    assert "should raise this exception" in result.stdout.str()
+    assert "ERROR at teardown of MyTestCase.test_hello" not in result.stdout.str()
+
+
+def test_error_message_with_parametrized_fixtures(testdir):
+    testdir.copy_example("unittest/test_parametrized_fixture_error_message.py")
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(
+        [
+            "*test_two does not support fixtures*",
+            "*TestSomethingElse::test_two",
+            "*Function type: TestCaseFunction",
+        ]
+    )

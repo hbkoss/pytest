@@ -1,6 +1,6 @@
 """ hook specifications for pytest plugins, invoked from main.py and builtin plugins.  """
-
 from pluggy import HookspecMarker
+
 from .deprecated import PYTEST_NAMESPACE
 
 
@@ -41,10 +41,10 @@ def pytest_namespace():
         Plugins whose users depend on the current namespace functionality should prepare to migrate to a
         namespace they actually own.
 
-        To support the migration its suggested to trigger ``DeprecationWarnings`` for objects they put into the
+        To support the migration it's suggested to trigger ``DeprecationWarnings`` for objects they put into the
         pytest namespace.
 
-        An stopgap measure to avoid the warning is to monkeypatch the ``pytest`` module, but just as the
+        A stopgap measure to avoid the warning is to monkeypatch the ``pytest`` module, but just as the
         ``pytest_namespace`` hook this should be seen as a temporary measure to be removed in future versions after
         an appropriate transition period.
     """
@@ -526,12 +526,46 @@ def pytest_terminal_summary(terminalreporter, exitstatus):
 
 @hookspec(historic=True)
 def pytest_logwarning(message, code, nodeid, fslocation):
-    """ process a warning specified by a message, a code string,
+    """
+    .. deprecated:: 3.8
+
+        This hook is will stop working in a future release.
+
+        pytest no longer triggers this hook, but the
+        terminal writer still implements it to display warnings issued by
+        :meth:`_pytest.config.Config.warn` and :meth:`_pytest.nodes.Node.warn`. Calling those functions will be
+        an error in future releases.
+
+    process a warning specified by a message, a code string,
     a nodeid and fslocation (both of which may be None
     if the warning is not tied to a particular node/location).
 
     .. note::
         This hook is incompatible with ``hookwrapper=True``.
+    """
+
+
+@hookspec(historic=True)
+def pytest_warning_captured(warning_message, when, item):
+    """
+    Process a warning captured by the internal pytest warnings plugin.
+
+    :param warnings.WarningMessage warning_message:
+        The captured warning. This is the same object produced by :py:func:`warnings.catch_warnings`, and contains
+        the same attributes as the parameters of :py:func:`warnings.showwarning`.
+
+    :param str when:
+        Indicates when the warning was captured. Possible values:
+
+        * ``"config"``: during pytest configuration/initialization stage.
+        * ``"collect"``: during test collection.
+        * ``"runtest"``: during test execution.
+
+    :param pytest.Item|None item:
+        **DEPRECATED**: This parameter is incompatible with ``pytest-xdist``, and will always receive ``None``
+        in a future release.
+
+        The item being executed if ``when`` is ``"runtest"``, otherwise ``None``.
     """
 
 
@@ -569,9 +603,21 @@ def pytest_exception_interact(node, call, report):
     """
 
 
-def pytest_enter_pdb(config):
+def pytest_enter_pdb(config, pdb):
     """ called upon pdb.set_trace(), can be used by plugins to take special
     action just before the python debugger enters in interactive mode.
 
     :param _pytest.config.Config config: pytest config object
+    :param pdb.Pdb pdb: Pdb instance
+    """
+
+
+def pytest_leave_pdb(config, pdb):
+    """ called when leaving pdb (e.g. with continue after pdb.set_trace()).
+
+    Can be used by plugins to take special action just after the python
+    debugger leaves interactive mode.
+
+    :param _pytest.config.Config config: pytest config object
+    :param pdb.Pdb pdb: Pdb instance
     """

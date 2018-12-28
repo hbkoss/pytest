@@ -5,28 +5,36 @@ repos:
     hooks:
     -   id: black
         args: [--safe, --quiet]
-        language_version: python3.6
+        language_version: python3
 -   repo: https://github.com/asottile/blacken-docs
-    rev: v0.2.0
+    rev: v0.3.0
     hooks:
     -   id: blacken-docs
-        additional_dependencies: [black==18.6b4]
-        language_version: python3.6
+        additional_dependencies: [black==18.9b0]
+        language_version: python3
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v1.3.0
+    rev: v2.0.0
     hooks:
     -   id: trailing-whitespace
     -   id: end-of-file-fixer
     -   id: check-yaml
     -   id: debug-statements
         exclude: _pytest/debugging.py
+        language_version: python3
     -   id: flake8
--   repo: https://github.com/asottile/pyupgrade
-    rev: v1.2.0
+        language_version: python3
+-   repo: https://github.com/asottile/reorder_python_imports
+    rev: v1.3.3
     hooks:
-    - id: pyupgrade
+    -   id: reorder-python-imports
+        args: ['--application-directories=.:src']
+-   repo: https://github.com/asottile/pyupgrade
+    rev: v1.10.1
+    hooks:
+    -   id: pyupgrade
+        args: [--keep-percent-format]
 -   repo: https://github.com/pre-commit/pygrep-hooks
-    rev: v1.0.0
+    rev: v1.1.0
     hooks:
     -   id: rst-backticks
 -   repo: local
@@ -37,9 +45,9 @@ repos:
         files: ^(CHANGELOG.rst|HOWTORELEASE.rst|README.rst|changelog/.*)$
         language: python
         additional_dependencies: [pygments, restructuredtext_lint]
-        python_version: python3.6
     -   id: changelogs-rst
-        name: changelog files must end in .rst
-        entry: ./scripts/fail
-        language: script
-        files: 'changelog/.*(?<!\.rst)$'
+        name: changelog filenames
+        language: fail
+        entry: 'changelog files must be named ####.(feature|bugfix|doc|deprecation|removal|vendor|trivial).rst'
+        exclude: changelog/(\d+\.(feature|bugfix|doc|deprecation|removal|vendor|trivial).rst|README.rst|_template.rst)
+        files: ^changelog/

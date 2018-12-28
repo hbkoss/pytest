@@ -1,9 +1,13 @@
 """ support for skip/xfail functions and markers. """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 from _pytest.config import hookimpl
 from _pytest.mark.evaluate import MarkEvaluator
-from _pytest.outcomes import fail, skip, xfail
+from _pytest.outcomes import fail
+from _pytest.outcomes import skip
+from _pytest.outcomes import xfail
 
 
 def pytest_addoption(parser):
@@ -51,7 +55,7 @@ def pytest_configure(config):
         "results in a True value.  Evaluation happens within the "
         "module global context. Example: skipif('sys.platform == \"win32\"') "
         "skips the test if we are on the win32 platform. see "
-        "http://pytest.org/latest/skipping.html",
+        "https://docs.pytest.org/en/latest/skipping.html",
     )
     config.addinivalue_line(
         "markers",
@@ -61,7 +65,7 @@ def pytest_configure(config):
         "and run=False if you don't even want to execute the test function. "
         "If only specific exception(s) are expected, you can list them in "
         "raises, and if the test fails in other ways, it will be reported as "
-        "a true failure. See http://pytest.org/latest/skipping.html",
+        "a true failure. See https://docs.pytest.org/en/latest/skipping.html",
     )
 
 

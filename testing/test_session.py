@@ -1,8 +1,10 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import pytest
-
 from _pytest.main import EXIT_NOTESTSCOLLECTED
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
 
 
 class SessionTests(object):
@@ -76,7 +78,8 @@ class SessionTests(object):
             """
             def test_1():
                 yield None
-        """
+        """,
+            SHOW_PYTEST_WARNINGS_ARG,
         )
         failures = reprec.getfailedcollections()
         out = failures[0].longrepr.reprcrash.message
@@ -218,7 +221,7 @@ class TestNewSession(SessionTests):
         started = reprec.getcalls("pytest_collectstart")
         finished = reprec.getreports("pytest_collectreport")
         assert len(started) == len(finished)
-        assert len(started) == 7  # XXX extra TopCollector
+        assert len(started) == 8
         colfail = [x for x in finished if x.failed]
         assert len(colfail) == 1
 
@@ -273,16 +276,26 @@ def test_deselect(testdir):
     testdir.makepyfile(
         test_a="""
         import pytest
+
         def test_a1(): pass
+
         @pytest.mark.parametrize('b', range(3))
         def test_a2(b): pass
+
+        class TestClass:
+            def test_c1(self): pass
+
+            def test_c2(self): pass
     """
     )
     result = testdir.runpytest(
-        "-v", "--deselect=test_a.py::test_a2[1]", "--deselect=test_a.py::test_a2[2]"
+        "-v",
+        "--deselect=test_a.py::test_a2[1]",
+        "--deselect=test_a.py::test_a2[2]",
+        "--deselect=test_a.py::TestClass::test_c1",
     )
     assert result.ret == 0
-    result.stdout.fnmatch_lines(["*2 passed, 2 deselected*"])
+    result.stdout.fnmatch_lines(["*3 passed, 3 deselected*"])
     for line in result.stdout.lines:
         assert not line.startswith(("test_a.py::test_a2[1]", "test_a.py::test_a2[2]"))
 
@@ -322,7 +335,11 @@ def test_rootdir_option_arg(testdir, monkeypatch, path):
 
     result = testdir.runpytest("--rootdir={}".format(path))
     result.stdout.fnmatch_lines(
-        ["*rootdir: {}/root, inifile:*".format(testdir.tmpdir), "*1 passed*"]
+        [
+            "*rootdir: {}/root, inifile:*".format(testdir.tmpdir),
+            "root/test_rootdir_option_arg.py *",
+            "*1 passed*",
+        ]
     )
 
 

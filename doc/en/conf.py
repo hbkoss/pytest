@@ -10,17 +10,15 @@
 #
 # All configuration values have a default; values that are commented out
 # serve to show the default.
-
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 #
 # The full version, including alpha/beta/rc tags.
 # The short X.Y version.
-
+import datetime
 import os
 import sys
-import datetime
 
 from _pytest import __version__ as version
 
@@ -42,6 +40,7 @@ todo_include_todos = 1
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
+    "pygments_pytest",
     "sphinx.ext.autodoc",
     "sphinx.ext.todo",
     "sphinx.ext.autosummary",
@@ -329,7 +328,7 @@ texinfo_documents = [
 
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {"python": ("http://docs.python.org/3", None)}
+intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 
 
 def setup(app):

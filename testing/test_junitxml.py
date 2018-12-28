@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import, division, print_function
-from xml.dom import minidom
-import py
-import sys
-import os
-from _pytest.junitxml import LogXML
-import pytest
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
+import os
+import sys
+from xml.dom import minidom
+
+import py
+
+import pytest
+from _pytest.junitxml import LogXML
 from _pytest.reports import BaseReport
 
 
@@ -367,7 +371,7 @@ class TestPython(object):
             import sys
 
             def test_fail():
-                print ("hello-stdout")
+                print("hello-stdout")
                 sys.stderr.write("hello-stderr\\n")
                 logging.info('info msg')
                 logging.warning('warning msg')
@@ -476,7 +480,7 @@ class TestPython(object):
         tnode.assert_attr(
             file="test_junit_prefixing.py",
             line="3",
-            classname="xyz.test_junit_prefixing." "TestHello",
+            classname="xyz.test_junit_prefixing.TestHello",
             name="test_hello",
         )
 
@@ -585,7 +589,7 @@ class TestPython(object):
             """
             # coding: latin1
             def test_hello():
-                print (%r)
+                print(%r)
                 assert 0
         """
             % value
@@ -850,7 +854,7 @@ def test_logxml_path_expansion(tmpdir, monkeypatch):
     assert xml_tilde.logfile == home_tilde
 
     # this is here for when $HOME is not set correct
-    monkeypatch.setenv("HOME", tmpdir)
+    monkeypatch.setenv("HOME", str(tmpdir))
     home_var = os.path.normpath(os.path.expandvars("$HOME/test.xml"))
 
     xml_var = LogXML("$HOME%stest.xml" % tmpdir.sep, None)
@@ -941,7 +945,7 @@ def test_double_colon_split_method_issue469(testdir):
 def test_unicode_issue368(testdir):
     path = testdir.tmpdir.join("test.xml")
     log = LogXML(str(path), None)
-    ustr = py.builtin._totext("ВНИ!", "utf-8")
+    ustr = u"ВНИ!"
 
     class Report(BaseReport):
         longrepr = ustr
@@ -1005,6 +1009,7 @@ def test_record_property_same_name(testdir):
     pnodes[1].assert_attr(name="foo", value="baz")
 
 
+@pytest.mark.filterwarnings("default")
 def test_record_attribute(testdir):
     testdir.makepyfile(
         """
@@ -1023,16 +1028,17 @@ def test_record_attribute(testdir):
     tnode.assert_attr(bar="1")
     tnode.assert_attr(foo="<1")
     result.stdout.fnmatch_lines(
-        ["test_record_attribute.py::test_record", "*record_xml_attribute*experimental*"]
+        ["*test_record_attribute.py:6:*record_xml_attribute is an experimental feature"]
     )
 
 
-def test_random_report_log_xdist(testdir):
+def test_random_report_log_xdist(testdir, monkeypatch):
     """xdist calls pytest_runtest_logreport as they are executed by the slaves,
     with nodes from several nodes overlapping, so junitxml must cope with that
     to produce correct reports. #1064
     """
     pytest.importorskip("xdist")
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
     testdir.makepyfile(
         """
         import pytest, time
@@ -1221,3 +1227,19 @@ def test_set_suite_name(testdir, suite_name):
     assert result.ret == 0
     node = dom.find_first_by_tag("testsuite")
     node.assert_attr(name=expected)
+
+
+def test_escaped_skipreason_issue3533(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+        @pytest.mark.skip(reason='1 <> 2')
+        def test_skip():
+            pass
+    """
+    )
+    _, dom = runandparse(testdir)
+    node = dom.find_first_by_tag("testcase")
+    snode = node.find_first_by_tag("skipped")
+    assert "1 <> 2" in snode.text
+    snode.assert_attr(message="1 <> 2")

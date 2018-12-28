@@ -1,6 +1,8 @@
-from pytest import raises
+import six
+
 import _pytest._code
-import py
+import pytest
+from pytest import raises
 
 
 def otherfunc(a, b):
@@ -15,13 +17,9 @@ def otherfunc_multi(a, b):
     assert a == b
 
 
+@pytest.mark.parametrize("param1, param2", [(3, 6)])
 def test_generative(param1, param2):
     assert param1 * 2 < param2
-
-
-def pytest_generate_tests(metafunc):
-    if "param1" in metafunc.fixturenames:
-        metafunc.addcall(funcargs=dict(param1=3, param2=6))
 
 
 class TestFailing(object):
@@ -177,7 +175,7 @@ def test_dynamic_compile_shows_nicely():
     name = "abc-123"
     module = imp.new_module(name)
     code = _pytest._code.compile(src, name, "exec")
-    py.builtin.exec_(code, module.__dict__)
+    six.exec_(code, module.__dict__)
     sys.modules[name] = module
     module.foo()
 
@@ -247,7 +245,7 @@ class TestCustomAssertMsg(object):
         b = 2
         assert (
             A.a == b
-        ), "A.a appears not to be b\n" "or does not appear to be b\none of those"
+        ), "A.a appears not to be b\nor does not appear to be b\none of those"
 
     def test_custom_repr(self):
         class JSON(object):

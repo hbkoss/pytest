@@ -2,8 +2,10 @@
 exception classes and constants handling test outcomes
 as well as functions creating them
 """
-from __future__ import absolute_import, division, print_function
-import py
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import sys
 
 
@@ -21,7 +23,7 @@ class OutcomeException(BaseException):
         if self.msg:
             val = self.msg
             if isinstance(val, bytes):
-                val = py._builtin._totext(val, errors="replace")
+                val = val.decode("UTF-8", errors="replace")
             return val
         return "<%s instance>" % (self.__class__.__name__,)
 
@@ -50,31 +52,43 @@ class Failed(OutcomeException):
 class Exit(KeyboardInterrupt):
     """ raised for immediate program exits (no tracebacks/summaries)"""
 
-    def __init__(self, msg="unknown reason"):
+    def __init__(self, msg="unknown reason", returncode=None):
         self.msg = msg
+        self.returncode = returncode
         KeyboardInterrupt.__init__(self, msg)
 
 
 # exposed helper methods
 
 
-def exit(msg):
-    """ exit testing process as if KeyboardInterrupt was triggered. """
+def exit(msg, returncode=None):
+    """
+    Exit testing process as if KeyboardInterrupt was triggered.
+
+    :param str msg: message to display upon exit.
+    :param int returncode: return code to be used when exiting pytest.
+    """
     __tracebackhide__ = True
-    raise Exit(msg)
+    raise Exit(msg, returncode)
 
 
 exit.Exception = Exit
 
 
 def skip(msg="", **kwargs):
-    """ skip an executing test with the given message.  Note: it's usually
-    better to use the pytest.mark.skipif marker to declare a test to be
-    skipped under certain conditions like mismatching platforms or
-    dependencies.  See the pytest_skipping plugin for details.
+    """
+    Skip an executing test with the given message.
+
+    This function should be called only during testing (setup, call or teardown) or
+    during collection by using the ``allow_module_level`` flag.
 
     :kwarg bool allow_module_level: allows this function to be called at
         module level, skipping the rest of the module. Default to False.
+
+    .. note::
+        It is better to use the :ref:`pytest.mark.skipif ref` marker when possible to declare a test to be
+        skipped under certain conditions like mismatching platforms or
+        dependencies.
     """
     __tracebackhide__ = True
     allow_module_level = kwargs.pop("allow_module_level", False)
@@ -88,10 +102,12 @@ skip.Exception = Skipped
 
 
 def fail(msg="", pytrace=True):
-    """ explicitly fail a currently-executing test with the given Message.
+    """
+    Explicitly fail an executing test with the given message.
 
-    :arg pytrace: if false the msg represents the full failure information
-                  and no python traceback will be reported.
+    :param str msg: the message to show the user as reason for the failure.
+    :param bool pytrace: if false the msg represents the full failure information and no
+        python traceback will be reported.
     """
     __tracebackhide__ = True
     raise Failed(msg=msg, pytrace=pytrace)
@@ -105,7 +121,15 @@ class XFailed(fail.Exception):
 
 
 def xfail(reason=""):
-    """ xfail an executing test or setup functions with the given reason."""
+    """
+    Imperatively xfail an executing test or setup functions with the given reason.
+
+    This function should be called only during testing (setup, call or teardown).
+
+    .. note::
+        It is better to use the :ref:`pytest.mark.xfail ref` marker when possible to declare a test to be
+        xfailed under certain conditions like known bugs or missing features.
+    """
     __tracebackhide__ = True
     raise XFailed(reason)
 

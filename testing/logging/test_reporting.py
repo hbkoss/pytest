@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-import re
 import os
+import re
 from io import open
 
 import six
@@ -876,22 +876,18 @@ def test_live_logging_suspends_capture(has_capture_manager, request):
     is installed.
     """
     import logging
+    import contextlib
     from functools import partial
-    from _pytest.capture import CaptureManager
     from _pytest.logging import _LiveLoggingStreamHandler
 
     class MockCaptureManager:
         calls = []
 
-        def suspend_global_capture(self):
-            self.calls.append("suspend_global_capture")
-
-        def resume_global_capture(self):
-            self.calls.append("resume_global_capture")
-
-    # sanity check
-    assert CaptureManager.suspend_capture_item
-    assert CaptureManager.resume_global_capture
+        @contextlib.contextmanager
+        def global_and_fixture_disabled(self):
+            self.calls.append("enter disabled")
+            yield
+            self.calls.append("exit disabled")
 
     class DummyTerminal(six.StringIO):
         def section(self, *args, **kwargs):
@@ -908,10 +904,101 @@ def test_live_logging_suspends_capture(has_capture_manager, request):
 
     logger.critical("some message")
     if has_capture_manager:
-        assert MockCaptureManager.calls == [
-            "suspend_global_capture",
-            "resume_global_capture",
-        ]
+        assert MockCaptureManager.calls == ["enter disabled", "exit disabled"]
     else:
         assert MockCaptureManager.calls == []
     assert out_file.getvalue() == "\nsome message\n"
+
+
+def test_collection_live_logging(testdir):
+    testdir.makepyfile(
+        """
+        import logging
+
+        logging.getLogger().info("Normal message")
+    """
+    )
+
+    result = testdir.runpytest("--log-cli-level=INFO")
+    result.stdout.fnmatch_lines(
+        [
+            "collecting*",
+            "*--- live log collection ---*",
+            "*Normal message*",
+            "collected 0 items",
+        ]
+    )
+
+
+def test_collection_logging_to_file(testdir):
+    log_file = testdir.tmpdir.join("pytest.log").strpath
+
+    testdir.makeini(
+        """
+        [pytest]
+        log_file={}
+        log_file_level = INFO
+        """.format(
+            log_file
+        )
+    )
+
+    testdir.makepyfile(
+        """
+        import logging
+
+        logging.getLogger().info("Normal message")
+
+        def test_simple():
+            logging.getLogger().debug("debug message in test_simple")
+            logging.getLogger().info("info message in test_simple")
+    """
+    )
+
+    result = testdir.runpytest()
+
+    assert "--- live log collection ---" not in result.stdout.str()
+
+    assert result.ret == 0
+    assert os.path.isfile(log_file)
+    with open(log_file, encoding="utf-8") as rfh:
+        contents = rfh.read()
+        assert "Normal message" in contents
+        assert "debug message in test_simple" not in contents
+        assert "info message in test_simple" in contents
+
+
+def test_log_in_hooks(testdir):
+    log_file = testdir.tmpdir.join("pytest.log").strpath
+
+    testdir.makeini(
+        """
+        [pytest]
+        log_file={}
+        log_file_level = INFO
+        log_cli=true
+        """.format(
+            log_file
+        )
+    )
+    testdir.makeconftest(
+        """
+        import logging
+
+        def pytest_runtestloop(session):
+            logging.info('runtestloop')
+
+        def pytest_sessionstart(session):
+            logging.info('sessionstart')
+
+        def pytest_sessionfinish(session, exitstatus):
+            logging.info('sessionfinish')
+    """
+    )
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["*sessionstart*", "*runtestloop*", "*sessionfinish*"])
+    with open(log_file) as rfh:
+        contents = rfh.read()
+        assert "sessionstart" in contents
+        assert "runtestloop" in contents
+        assert "sessionfinish" in contents

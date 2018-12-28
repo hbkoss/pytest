@@ -58,18 +58,20 @@ by calling the ``pytest.skip(reason)`` function:
         if not valid_config():
             pytest.skip("unsupported configuration")
 
+The imperative method is useful when it is not possible to evaluate the skip condition
+during import time.
+
 It is also possible to skip the whole module using
 ``pytest.skip(reason, allow_module_level=True)`` at the module level:
 
 .. code-block:: python
 
+    import sys
     import pytest
 
-    if not pytest.config.getoption("--custom-flag"):
-        pytest.skip("--custom-flag is missing, skipping tests", allow_module_level=True)
+    if not sys.platform.startswith("win"):
+        pytest.skip("skipping windows-only tests", allow_module_level=True)
 
-The imperative method is useful when it is not possible to evaluate the skip condition
-during import time.
 
 **Reference**: :ref:`pytest.mark.skip ref`
 
@@ -135,12 +137,6 @@ You can use the ``skipif`` marker (as any other marker) on classes::
 
 If the condition is ``True``, this marker will produce a skip result for
 each of the test methods of that class.
-
-.. warning::
-
-   The use of ``skipif`` on classes that use inheritance is strongly
-   discouraged. `A Known bug <https://github.com/pytest-dev/pytest/issues/568>`_
-   in pytest's markers may cause unexpected behavior in super classes.
 
 If you want to skip all test functions of a module, you may use
 the ``pytestmark`` name on the global level:
@@ -283,7 +279,7 @@ on a particular platform::
 ~~~~~~~~~~~~~~~~~~~~
 
 If you want to be more specific as to why the test is failing, you can specify
-a single exception, or a list of exceptions, in the ``raises`` argument.
+a single exception, or a tuple of exceptions, in the ``raises`` argument.
 
 .. code-block:: python
 
@@ -327,11 +323,13 @@ Here is a simple test file with the several usages:
 
 .. literalinclude:: example/xfail_demo.py
 
-Running it with the report-on-xfail option gives this output::
+Running it with the report-on-xfail option gives this output:
+
+.. code-block:: pytest
 
     example $ pytest -rx xfail_demo.py
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR/example, inifile:
     collected 7 items
 

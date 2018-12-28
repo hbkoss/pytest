@@ -1,35 +1,28 @@
 environment:
-  COVERALLS_REPO_TOKEN:
-    secure: 2NJ5Ct55cHJ9WEg3xbSqCuv0rdgzzb6pnzOIG5OkMbTndw3wOBrXntWFoQrXiMFi
-    # this is pytest's token in coveralls.io, encrypted
-    # using pytestbot account as detailed here:
-    # https://www.appveyor.com/docs/build-configuration#secure-variables
-
   matrix:
-  # coveralls is not in the default env list
-  - TOXENV: "coveralls"
-  # note: please use "tox --listenvs" to populate the build matrix below
-  - TOXENV: "linting"
-  - TOXENV: "py27"
-  - TOXENV: "py34"
-  - TOXENV: "py35"
-  - TOXENV: "py36"
-  - TOXENV: "py37"
-#  - TOXENV: "pypy" reenable when we are able to provide a scandir wheel or build scandir
-  - TOXENV: "py27-pexpect"
+  - TOXENV: "py37-xdist"
   - TOXENV: "py27-xdist"
-  - TOXENV: "py27-trial"
-  - TOXENV: "py27-numpy"
+  - TOXENV: "py27"
+  - TOXENV: "py37"
+  - TOXENV: "linting,docs,doctesting"
+  - TOXENV: "py36"
+  - TOXENV: "py35"
+  - TOXENV: "py34"
+  - TOXENV: "pypy"
+    PYTEST_NO_COVERAGE: "1"
+  # Specialized factors for py27.
+  - TOXENV: "py27-trial,py27-numpy,py27-nobyte"
   - TOXENV: "py27-pluggymaster"
-  - TOXENV: "py36-pexpect"
-  - TOXENV: "py36-xdist"
-  - TOXENV: "py36-trial"
-  - TOXENV: "py36-numpy"
-  - TOXENV: "py36-pluggymaster"
-  - TOXENV: "py27-nobyte"
-  - TOXENV: "doctesting"
-  - TOXENV: "py36-freeze"
-  - TOXENV: "docs"
+    PYTEST_NO_COVERAGE: "1"
+  # Specialized factors for py37.
+  - TOXENV: "py37-trial,py37-numpy"
+  - TOXENV: "py37-pluggymaster"
+    PYTEST_NO_COVERAGE: "1"
+  - TOXENV: "py37-freeze"
+    PYTEST_NO_COVERAGE: "1"
+
+matrix:
+  fast_finish: true
 
 install:
   - echo Installed Pythons
@@ -37,12 +30,19 @@ install:
 
   - if "%TOXENV%" == "pypy" call scripts\install-pypy.bat
 
+  - C:\Python36\python -m pip install --upgrade pip
   - C:\Python36\python -m pip install --upgrade --pre tox
 
 build: false  # Not a C# project, build stuff at the test step instead.
 
+before_test:
+  - call scripts\prepare-coverage.bat
+
 test_script:
-  - call scripts\call-tox.bat
+  - C:\Python36\python -m tox
+
+on_success:
+  - call scripts\upload-coverage.bat
 
 cache:
   - '%LOCALAPPDATA%\pip\cache'

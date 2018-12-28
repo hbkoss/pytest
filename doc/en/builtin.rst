@@ -12,7 +12,9 @@ For information on plugin hooks and objects, see :ref:`plugins`.
 
 For information on the ``pytest.mark`` mechanism, see :ref:`mark`.
 
-For information about fixtures, see :ref:`fixtures`. To see a complete list of available fixtures (add ``-v`` to also see fixtures with leading ``_``), type ::
+For information about fixtures, see :ref:`fixtures`. To see a complete list of available fixtures (add ``-v`` to also see fixtures with leading ``_``), type :
+
+.. code-block:: pytest
 
     $ pytest -q --fixtures
     cache
@@ -75,7 +77,7 @@ For information about fixtures, see :ref:`fixtures`. To see a complete list of a
     caplog
         Access and control log capturing.
 
-        Captured logs are available through the following methods::
+        Captured logs are available through the following properties/methods::
 
         * caplog.text            -> string containing formatted log output
         * caplog.records         -> list of logging.LogRecord instances
@@ -104,7 +106,9 @@ For information about fixtures, see :ref:`fixtures`. To see a complete list of a
         See http://docs.python.org/library/warnings.html for information
         on warning categories.
     tmpdir_factory
-        Return a TempdirFactory instance for the test session.
+        Return a :class:`_pytest.tmpdir.TempdirFactory` instance for the test session.
+    tmp_path_factory
+        Return a :class:`_pytest.tmpdir.TempPathFactory` instance for the test session.
     tmpdir
         Return a temporary directory path object
         which is unique to each test function invocation,
@@ -113,6 +117,16 @@ For information about fixtures, see :ref:`fixtures`. To see a complete list of a
         path object.
 
         .. _`py.path.local`: https://py.readthedocs.io/en/latest/path.html
+    tmp_path
+        Return a temporary directory path object
+        which is unique to each test function invocation,
+        created as a sub directory of the base temporary
+        directory.  The returned object is a :class:`pathlib.Path`
+        object.
+
+        .. note::
+
+            in python < 3.6 this is a pathlib2.Path
 
     no tests ran in 0.12 seconds
 

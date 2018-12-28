@@ -22,11 +22,13 @@ following::
         assert f() == 4
 
 to assert that your function returns a certain value. If this assertion fails
-you will see the return value of the function call::
+you will see the return value of the function call:
+
+.. code-block:: pytest
 
     $ pytest test_assert1.py
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR, inifile:
     collected 1 item
 
@@ -165,11 +167,13 @@ when it encounters comparisons.  For example::
         set2 = set("8035")
         assert set1 == set2
 
-if you run this module::
+if you run this module:
+
+.. code-block:: pytest
 
     $ pytest test_assert2.py
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR, inifile:
     collected 1 item
 
@@ -235,7 +239,9 @@ now, given this test module::
        assert f1 == f2
 
 you can run the test module and get the custom output defined in
-the conftest file::
+the conftest file:
+
+.. code-block:: pytest
 
    $ pytest -q test_foocompare.py
    F                                                                    [100%]
@@ -264,8 +270,12 @@ Advanced assertion introspection
 Reporting details about a failing assertion is achieved by rewriting assert
 statements before they are run.  Rewritten assert statements put introspection
 information into the assertion failure message.  ``pytest`` only rewrites test
-modules directly discovered by its test collection process, so asserts in
-supporting modules which are not themselves test modules will not be rewritten.
+modules directly discovered by its test collection process, so **asserts in
+supporting modules which are not themselves test modules will not be rewritten**.
+
+You can manually enable assertion rewriting for an imported module by calling
+`register_assert_rewrite <https://docs.pytest.org/en/latest/writing_plugins.html#assertion-rewriting>`_
+before you import it (a good place to do that is in ``conftest.py``).
 
 .. note::
 

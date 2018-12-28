@@ -58,11 +58,13 @@ and another like this::
         """
         return 42
 
-then you can just invoke ``pytest`` without command line options::
+then you can just invoke ``pytest`` without command line options:
+
+.. code-block:: pytest
 
     $ pytest
     =========================== test session starts ============================
-    platform linux -- Python 3.x.y, pytest-3.x.y, py-1.x.y, pluggy-0.x.y
+    platform linux -- Python 3.x.y, pytest-4.x.y, py-1.x.y, pluggy-0.x.y
     rootdir: $REGENDOC_TMPDIR, inifile: pytest.ini
     collected 1 item
 
@@ -152,6 +154,9 @@ which can then be used in your doctests directly::
         """
         pass
 
+Note that like the normal ``conftest.py``, the fixtures are discovered in the directory tree conftest is in.
+Meaning that if you put your doctest with your source code, the relevant conftest.py needs to be in the same directory tree.
+Fixtures will not be discovered in a sibling directory tree!
 
 Output format
 -------------

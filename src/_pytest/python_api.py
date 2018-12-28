@@ -1,20 +1,20 @@
 import math
 import pprint
 import sys
-from numbers import Number
 from decimal import Decimal
+from numbers import Number
 
-import py
-from six.moves import zip, filterfalse
+import six
 from more_itertools.more import always_iterable
+from six.moves import filterfalse
+from six.moves import zip
 
-from _pytest.compat import isclass
-
-from _pytest.compat import Mapping, Sequence
-from _pytest.compat import STRING_TYPES
-
-from _pytest.outcomes import fail
 import _pytest._code
+from _pytest.compat import isclass
+from _pytest.compat import Mapping
+from _pytest.compat import Sequence
+from _pytest.compat import STRING_TYPES
+from _pytest.outcomes import fail
 
 BASE_TYPE = (type, STRING_TYPES)
 
@@ -679,9 +679,9 @@ def raises(expected_exception, *args, **kwargs):
         loc.update(kwargs)
         # print "raises frame scope: %r" % frame.f_locals
         try:
-            code = _pytest._code.Source(code).compile()
-            py.builtin.exec_(code, frame.f_globals, loc)
-            # XXX didn'T mean f_globals == f_locals something special?
+            code = _pytest._code.Source(code).compile(_genframe=frame)
+            six.exec_(code, frame.f_globals, loc)
+            # XXX didn't mean f_globals == f_locals something special?
             #     this is destroyed here ...
         except expected_exception:
             return _pytest._code.ExceptionInfo()
@@ -716,6 +716,6 @@ class RaisesContext(object):
         suppress_exception = issubclass(self.excinfo.type, self.expected_exception)
         if sys.version_info[0] == 2 and suppress_exception:
             sys.exc_clear()
-        if self.match_expr and suppress_exception:
+        if self.match_expr is not None and suppress_exception:
             self.excinfo.match(self.match_expr)
         return suppress_exception

@@ -1,7 +1,13 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
+import re
 import sys
 import textwrap
+
+import six
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -163,7 +169,8 @@ def test_delitem():
 
 def test_setenv():
     monkeypatch = MonkeyPatch()
-    monkeypatch.setenv("XYZ123", 2)
+    with pytest.warns(pytest.PytestWarning):
+        monkeypatch.setenv("XYZ123", 2)
     import os
 
     assert os.environ["XYZ123"] == "2"
@@ -192,13 +199,50 @@ def test_delenv():
             del os.environ[name]
 
 
+class TestEnvironWarnings(object):
+    """
+    os.environ keys and values should be native strings, otherwise it will cause problems with other modules (notably
+    subprocess). On Python 2 os.environ accepts anything without complaining, while Python 3 does the right thing
+    and raises an error.
+    """
+
+    VAR_NAME = u"PYTEST_INTERNAL_MY_VAR"
+
+    @pytest.mark.skipif(six.PY3, reason="Python 2 only test")
+    def test_setenv_unicode_key(self, monkeypatch):
+        with pytest.warns(
+            pytest.PytestWarning,
+            match="Environment variable name {!r} should be str".format(self.VAR_NAME),
+        ):
+            monkeypatch.setenv(self.VAR_NAME, "2")
+
+    @pytest.mark.skipif(six.PY3, reason="Python 2 only test")
+    def test_delenv_unicode_key(self, monkeypatch):
+        with pytest.warns(
+            pytest.PytestWarning,
+            match="Environment variable name {!r} should be str".format(self.VAR_NAME),
+        ):
+            monkeypatch.delenv(self.VAR_NAME, raising=False)
+
+    def test_setenv_non_str_warning(self, monkeypatch):
+        value = 2
+        msg = (
+            "Value of environment variable PYTEST_INTERNAL_MY_VAR type should be str, "
+            "but got 2 (type: int); converted to str implicitly"
+        )
+        with pytest.warns(pytest.PytestWarning, match=re.escape(msg)):
+            monkeypatch.setenv(str(self.VAR_NAME), value)
+
+
 def test_setenv_prepend():
     import os
 
     monkeypatch = MonkeyPatch()
-    monkeypatch.setenv("XYZ123", 2, prepend="-")
+    with pytest.warns(pytest.PytestWarning):
+        monkeypatch.setenv("XYZ123", 2, prepend="-")
     assert os.environ["XYZ123"] == "2"
-    monkeypatch.setenv("XYZ123", 3, prepend="-")
+    with pytest.warns(pytest.PytestWarning):
+        monkeypatch.setenv("XYZ123", 3, prepend="-")
     assert os.environ["XYZ123"] == "3-2"
     monkeypatch.undo()
     assert "XYZ123" not in os.environ
@@ -228,11 +272,15 @@ def test_syspath_prepend(mp):
 
 
 def test_syspath_prepend_double_undo(mp):
-    mp.syspath_prepend("hello world")
-    mp.undo()
-    sys.path.append("more hello world")
-    mp.undo()
-    assert sys.path[-1] == "more hello world"
+    old_syspath = sys.path[:]
+    try:
+        mp.syspath_prepend("hello world")
+        mp.undo()
+        sys.path.append("more hello world")
+        mp.undo()
+        assert sys.path[-1] == "more hello world"
+    finally:
+        sys.path[:] = old_syspath
 
 
 def test_chdir_with_path_local(mp, tmpdir):

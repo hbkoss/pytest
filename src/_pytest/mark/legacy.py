@@ -2,8 +2,9 @@
 this is a place where we put datastructures used by legacy apis
 we hope ot remove
 """
-import attr
 import keyword
+
+import attr
 
 from _pytest.config import UsageError
 
@@ -66,7 +67,10 @@ python_keywords_allowed_list = ["or", "and", "not"]
 
 def matchmark(colitem, markexpr):
     """Tries to match on any marker names, attached to the given colitem."""
-    return eval(markexpr, {}, MarkMapping.from_item(colitem))
+    try:
+        return eval(markexpr, {}, MarkMapping.from_item(colitem))
+    except SyntaxError as e:
+        raise SyntaxError(str(e) + "\nMarker expression must be valid Python!")
 
 
 def matchkeyword(colitem, keywordexpr):

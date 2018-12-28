@@ -1,16 +1,22 @@
 """ basic collect and runtest protocol implementations """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import bdb
 import os
 import sys
 from time import time
 
-import py
-from _pytest._code.code import ExceptionInfo
-from _pytest.outcomes import skip, Skipped, TEST_OUTCOME
+import six
 
-from .reports import TestReport, CollectReport, CollectErrorRepr
+from .reports import CollectErrorRepr
+from .reports import CollectReport
+from .reports import TestReport
+from _pytest._code.code import ExceptionInfo
+from _pytest.outcomes import skip
+from _pytest.outcomes import Skipped
+from _pytest.outcomes import TEST_OUTCOME
 
 #
 # pytest plugin hooks
@@ -30,6 +36,7 @@ def pytest_addoption(parser):
 
 def pytest_terminal_summary(terminalreporter):
     durations = terminalreporter.config.option.durations
+    verbose = terminalreporter.config.getvalue("verbose")
     if durations is None:
         return
     tr = terminalreporter
@@ -49,8 +56,11 @@ def pytest_terminal_summary(terminalreporter):
         dlist = dlist[:durations]
 
     for rep in dlist:
-        nodeid = rep.nodeid.replace("::()::", "::")
-        tr.write_line("%02.2fs %-8s %s" % (rep.duration, rep.when, nodeid))
+        if verbose < 2 and rep.duration < 0.005:
+            tr.write_line("")
+            tr.write_line("(0.00 durations hidden.  Use -vv to show these durations.)")
+            break
+        tr.write_line("%02.2fs %-8s %s" % (rep.duration, rep.when, rep.nodeid))
 
 
 def pytest_sessionstart(session):
@@ -213,7 +223,8 @@ class CallInfo(object):
         if self.excinfo:
             status = "exception: %s" % str(self.excinfo.value)
         else:
-            status = "result: %r" % (self.result,)
+            result = getattr(self, "result", "<NOTSET>")
+            status = "result: %r" % (result,)
         return "<CallInfo when=%r %s>" % (self.when, status)
 
 
@@ -317,7 +328,7 @@ class SetupState(object):
                 if exc is None:
                     exc = sys.exc_info()
         if exc:
-            py.builtin._reraise(*exc)
+            six.reraise(*exc)
 
     def _teardown_with_finalization(self, colitem):
         self._callfinalizers(colitem)
@@ -352,7 +363,7 @@ class SetupState(object):
                 if exc is None:
                     exc = sys.exc_info()
         if exc:
-            py.builtin._reraise(*exc)
+            six.reraise(*exc)
 
     def prepare(self, colitem):
         """ setup objects along the collector chain to the test-method
@@ -363,7 +374,7 @@ class SetupState(object):
         # check if the last collection node has raised an error
         for col in self.stack:
             if hasattr(col, "_prepare_exc"):
-                py.builtin._reraise(*col._prepare_exc)
+                six.reraise(*col._prepare_exc)
         for col in needed_collectors[len(self.stack) :]:
             self.stack.append(col)
             try:

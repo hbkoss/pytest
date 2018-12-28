@@ -2,8 +2,12 @@
  test correct setup/teardowns at
  module, class, and instance level
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import pytest
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
 
 
 def test_module_and_function_setup(testdir):
@@ -186,7 +190,8 @@ def test_method_generator_setup(testdir):
                 assert self.classsetup
                 assert self.methsetup == self.test_generate
                 assert value == 5
-    """
+    """,
+        SHOW_PYTEST_WARNINGS_ARG,
     )
     reprec.assertoutcome(passed=1, failed=1)
 
@@ -197,26 +202,27 @@ def test_func_generator_setup(testdir):
         import sys
 
         def setup_module(mod):
-            print ("setup_module")
+            print("setup_module")
             mod.x = []
 
         def setup_function(fun):
-            print ("setup_function")
+            print("setup_function")
             x.append(1)
 
         def teardown_function(fun):
-            print ("teardown_function")
+            print("teardown_function")
             x.pop()
 
         def test_one():
             assert x == [1]
             def check():
-                print ("check")
+                print("check")
                 sys.stderr.write("e\\n")
                 assert x == [1]
             yield check
             assert x == [1]
-    """
+    """,
+        SHOW_PYTEST_WARNINGS_ARG,
     )
     rep = reprec.matchreport("test_one", names="pytest_runtest_logreport")
     assert rep.passed

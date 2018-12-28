@@ -59,9 +59,9 @@ To see a complete list of all plugins with their latest testing
 status against different pytest and Python versions, please visit
 `plugincompat <http://plugincompat.herokuapp.com/>`_.
 
-You may also discover more plugins through a `pytest- pypi.python.org search`_.
+You may also discover more plugins through a `pytest- pypi.org search`_.
 
-.. _`pytest- pypi.python.org search`: https://pypi.org/search/?q=pytest-
+.. _`pytest- pypi.org search`: https://pypi.org/search/?q=pytest-
 
 
 .. _`available installable plugins`:
@@ -69,16 +69,14 @@ You may also discover more plugins through a `pytest- pypi.python.org search`_.
 Requiring/Loading plugins in a test module or conftest file
 -----------------------------------------------------------
 
-You can require plugins in a test module or a conftest file like this::
+You can require plugins in a test module or a conftest file like this:
 
-    pytest_plugins = "myapp.testsupport.myplugin",
+.. code-block:: python
+
+    pytest_plugins = ("myapp.testsupport.myplugin",)
 
 When the test module or conftest plugin is loaded the specified plugins
 will be loaded as well.
-
-    pytest_plugins = "myapp.testsupport.myplugin"
-
-which will import the specified module as a ``pytest`` plugin.
 
 .. note::
     Requiring plugins using a ``pytest_plugins`` variable in non-root

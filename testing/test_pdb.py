@@ -1,11 +1,21 @@
-from __future__ import absolute_import, division, print_function
-import sys
-import platform
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
+import platform
+import sys
 
 import _pytest._code
-from _pytest.debugging import SUPPORTS_BREAKPOINT_BUILTIN
 import pytest
+from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
+
+try:
+    breakpoint
+except NameError:
+    SUPPORTS_BREAKPOINT_BUILTIN = False
+else:
+    SUPPORTS_BREAKPOINT_BUILTIN = True
 
 
 _ENVIRON_PYTHONBREAKPOINT = os.environ.get("PYTHONBREAKPOINT", "")
@@ -25,6 +35,8 @@ def custom_pdb_calls():
 
     # install dummy debugger class and track which methods were called on it
     class _CustomPdb(object):
+        quitting = False
+
         def __init__(self, *args, **kwargs):
             called.append("init")
 
@@ -142,16 +154,21 @@ class TestPDB(object):
             def test_1():
                 i = 0
                 assert i == 1
+
+            def test_not_called_due_to_quit():
+                pass
         """
         )
         child = testdir.spawn_pytest("--pdb %s" % p1)
         child.expect(".*def test_1")
         child.expect(".*i = 0")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
-        assert "1 failed" in rest
+        assert "= 1 failed in" in rest
         assert "def test_1" not in rest
+        assert "Exit: Quitting debugger" in rest
+        assert "PDB continue (IO-capturing resumed)" not in rest
         self.flush(child)
 
     @staticmethod
@@ -174,7 +191,7 @@ class TestPDB(object):
         """
         )
         child = testdir.spawn_pytest("--pdb %s" % p1)
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendline("p self.filename")
         child.sendeof()
         rest = child.read().decode("utf8")
@@ -209,7 +226,7 @@ class TestPDB(object):
         child = testdir.spawn_pytest("--pdb %s" % p1)
         child.expect("captured stdout")
         child.expect("get rekt")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -228,7 +245,7 @@ class TestPDB(object):
         child = testdir.spawn_pytest("--pdb %s" % p1)
         child.expect("captured stderr")
         child.expect("get rekt")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -243,7 +260,7 @@ class TestPDB(object):
         """
         )
         child = testdir.spawn_pytest("--pdb %s" % p1)
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         output = child.before.decode("utf8")
         child.sendeof()
         assert "captured stdout" not in output
@@ -260,11 +277,13 @@ class TestPDB(object):
                 assert False
         """
         )
-        child = testdir.spawn_pytest("--show-capture=%s --pdb %s" % (showcapture, p1))
+        child = testdir.spawn_pytest(
+            "--show-capture={} --pdb {}".format(showcapture, p1)
+        )
         if showcapture in ("all", "log"):
             child.expect("captured log")
             child.expect("get rekt")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -279,13 +298,11 @@ class TestPDB(object):
                 assert False
         """
         )
-        child = testdir.spawn_pytest(
-            "--show-capture=all --pdb " "-p no:logging %s" % p1
-        )
+        child = testdir.spawn_pytest("--show-capture=all --pdb -p no:logging %s" % p1)
         child.expect("get rekt")
         output = child.before.decode("utf8")
         assert "captured log" not in output
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -304,7 +321,7 @@ class TestPDB(object):
         child = testdir.spawn_pytest("--pdb %s" % p1)
         child.expect(".*def test_1")
         child.expect(".*pytest.raises.*globalfunc")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendline("globalfunc")
         child.expect(".*function")
         child.sendeof()
@@ -320,8 +337,8 @@ class TestPDB(object):
         )
         child = testdir.spawn_pytest("--pdb %s" % p1)
         # child.expect(".*import pytest.*")
-        child.expect("(Pdb)")
-        child.sendeof()
+        child.expect("Pdb")
+        child.sendline("c")
         child.expect("1 error")
         self.flush(child)
 
@@ -334,8 +351,20 @@ class TestPDB(object):
         )
         p1 = testdir.makepyfile("def test_func(): pass")
         child = testdir.spawn_pytest("--pdb %s" % p1)
-        # child.expect(".*import pytest.*")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
+
+        # INTERNALERROR is only displayed once via terminal reporter.
+        assert (
+            len(
+                [
+                    x
+                    for x in child.before.decode().splitlines()
+                    if x.startswith("INTERNALERROR> Traceback")
+                ]
+            )
+            == 1
+        )
+
         child.sendeof()
         self.flush(child)
 
@@ -345,7 +374,7 @@ class TestPDB(object):
             import pytest
             def test_1():
                 i = 0
-                print ("hello17")
+                print("hello17")
                 pytest.set_trace()
                 x = 3
         """
@@ -353,7 +382,7 @@ class TestPDB(object):
         child = testdir.spawn_pytest(str(p1))
         child.expect("test_1")
         child.expect("x = 3")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf-8")
         assert "1 failed" in rest
@@ -371,11 +400,12 @@ class TestPDB(object):
         )
         child = testdir.spawn_pytest(str(p1))
         child.expect("test_1")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
         assert "reading from stdin while output" not in rest
+        assert "BdbQuit" in rest
         self.flush(child)
 
     def test_pdb_and_capsys(self, testdir):
@@ -383,7 +413,7 @@ class TestPDB(object):
             """
             import pytest
             def test_1(capsys):
-                print ("hello1")
+                print("hello1")
                 pytest.set_trace()
         """
         )
@@ -395,6 +425,24 @@ class TestPDB(object):
         child.read()
         self.flush(child)
 
+    def test_pdb_with_caplog_on_pdb_invocation(self, testdir):
+        p1 = testdir.makepyfile(
+            """
+            def test_1(capsys, caplog):
+                import logging
+                logging.getLogger(__name__).warning("some_warning")
+                assert 0
+        """
+        )
+        child = testdir.spawn_pytest("--pdb %s" % str(p1))
+        child.send("caplog.record_tuples\n")
+        child.expect_exact(
+            "[('test_pdb_with_caplog_on_pdb_invocation', 30, 'some_warning')]"
+        )
+        child.sendeof()
+        child.read()
+        self.flush(child)
+
     def test_set_trace_capturing_afterwards(self, testdir):
         p1 = testdir.makepyfile(
             """
@@ -402,7 +450,7 @@ class TestPDB(object):
             def test_1():
                 pdb.set_trace()
             def test_2():
-                print ("hello")
+                print("hello")
                 assert 0
         """
         )
@@ -428,10 +476,10 @@ class TestPDB(object):
         """
         )
         child = testdir.spawn_pytest("--doctest-modules --pdb %s" % p1)
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendline("i")
         child.expect("0")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -443,26 +491,48 @@ class TestPDB(object):
             import pytest
             def test_1():
                 i = 0
-                print ("hello17")
+                print("hello17")
                 pytest.set_trace()
                 x = 3
-                print ("hello18")
+                print("hello18")
                 pytest.set_trace()
                 x = 4
         """
         )
         child = testdir.spawn_pytest(str(p1))
+        child.expect(r"PDB set_trace \(IO-capturing turned off\)")
         child.expect("test_1")
         child.expect("x = 3")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendline("c")
+        child.expect(r"PDB continue \(IO-capturing resumed\)")
+        child.expect(r"PDB set_trace \(IO-capturing turned off\)")
         child.expect("x = 4")
+        child.expect("Pdb")
         child.sendeof()
+        child.expect("_ test_1 _")
+        child.expect("def test_1")
+        child.expect("Captured stdout call")
         rest = child.read().decode("utf8")
-        assert "1 failed" in rest
-        assert "def test_1" in rest
         assert "hello17" in rest  # out is captured
         assert "hello18" in rest  # out is captured
+        assert "1 failed" in rest
+        self.flush(child)
+
+    def test_pdb_without_capture(self, testdir):
+        p1 = testdir.makepyfile(
+            """
+            import pytest
+            def test_1():
+                pytest.set_trace()
+        """
+        )
+        child = testdir.spawn_pytest("-s %s" % p1)
+        child.expect(r">>> PDB set_trace >>>")
+        child.expect("Pdb")
+        child.sendline("c")
+        child.expect(r">>> PDB continue >>>")
+        child.expect("1 passed")
         self.flush(child)
 
     def test_pdb_used_outside_test(self, testdir):
@@ -473,8 +543,9 @@ class TestPDB(object):
             x = 5
         """
         )
-        child = testdir.spawn("%s %s" % (sys.executable, p1))
+        child = testdir.spawn("{} {}".format(sys.executable, p1))
         child.expect("x = 5")
+        child.expect("Pdb")
         child.sendeof()
         self.flush(child)
 
@@ -491,23 +562,40 @@ class TestPDB(object):
         )
         child = testdir.spawn_pytest(str(p1))
         child.expect("x = 5")
+        child.expect("Pdb")
         child.sendeof()
         self.flush(child)
 
     def test_pdb_collection_failure_is_shown(self, testdir):
         p1 = testdir.makepyfile("xxx")
         result = testdir.runpytest_subprocess("--pdb", p1)
-        result.stdout.fnmatch_lines(["*NameError*xxx*", "*1 error*"])
+        result.stdout.fnmatch_lines(
+            ["E   NameError: *xxx*", "*! *Exit: Quitting debugger !*"]  # due to EOF
+        )
 
-    def test_enter_pdb_hook_is_called(self, testdir):
+    def test_enter_leave_pdb_hooks_are_called(self, testdir):
         testdir.makeconftest(
             """
-            def pytest_enter_pdb(config):
-                assert config.testing_verification == 'configured'
-                print 'enter_pdb_hook'
+            mypdb = None
 
             def pytest_configure(config):
                 config.testing_verification = 'configured'
+
+            def pytest_enter_pdb(config, pdb):
+                assert config.testing_verification == 'configured'
+                print('enter_pdb_hook')
+
+                global mypdb
+                mypdb = pdb
+                mypdb.set_attribute = "bar"
+
+            def pytest_leave_pdb(config, pdb):
+                assert config.testing_verification == 'configured'
+                print('leave_pdb_hook')
+
+                global mypdb
+                assert mypdb is pdb
+                assert mypdb.set_attribute == "bar"
         """
         )
         p1 = testdir.makepyfile(
@@ -516,11 +604,17 @@ class TestPDB(object):
 
             def test_foo():
                 pytest.set_trace()
+                assert 0
         """
         )
         child = testdir.spawn_pytest(str(p1))
         child.expect("enter_pdb_hook")
-        child.send("c\n")
+        child.sendline("c")
+        child.expect(r"PDB continue \(IO-capturing resumed\)")
+        child.expect("Captured stdout call")
+        rest = child.read().decode("utf8")
+        assert "leave_pdb_hook" in rest
+        assert "1 failed" in rest
         child.sendeof()
         self.flush(child)
 
@@ -541,7 +635,7 @@ class TestPDB(object):
             custom_pdb="""
             class CustomPdb(object):
                 def set_trace(*args, **kwargs):
-                    print 'custom set_trace>'
+                    print('custom set_trace>')
          """
         )
         p1 = testdir.makepyfile(
@@ -670,7 +764,7 @@ class TestDebuggingBreakpoints(object):
         )
         child = testdir.spawn_pytest(str(p1))
         child.expect("test_1")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -690,7 +784,7 @@ class TestDebuggingBreakpoints(object):
         )
         child = testdir.spawn_pytest(str(p1))
         child.expect("test_1")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 failed" in rest
@@ -708,7 +802,7 @@ class TestTraceOption:
         )
         child = testdir.spawn_pytest("--trace " + str(p1))
         child.expect("test_1")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 passed" in rest
@@ -725,11 +819,40 @@ class TestTraceOption:
                 yield is_equal, 1, 1
             """
         )
-        child = testdir.spawn_pytest("--trace " + str(p1))
+        child = testdir.spawn_pytest(
+            "{} --trace {}".format(SHOW_PYTEST_WARNINGS_ARG, str(p1))
+        )
         child.expect("is_equal")
-        child.expect("(Pdb)")
+        child.expect("Pdb")
         child.sendeof()
         rest = child.read().decode("utf8")
         assert "1 passed" in rest
         assert "reading from stdin while output" not in rest
         TestPDB.flush(child)
+
+
+def test_trace_after_runpytest(testdir):
+    """Test that debugging's pytest_configure is re-entrant."""
+    p1 = testdir.makepyfile(
+        """
+        from _pytest.debugging import pytestPDB
+
+        def test_outer(testdir):
+            from _pytest.debugging import pytestPDB
+
+            assert len(pytestPDB._saved) == 1
+
+            testdir.runpytest("-k test_inner")
+
+            __import__('pdb').set_trace()
+
+        def test_inner(testdir):
+            assert len(pytestPDB._saved) == 2
+    """
+    )
+    child = testdir.spawn_pytest("-p pytester %s -k test_outer" % p1)
+    child.expect(r"\(Pdb")
+    child.sendline("c")
+    rest = child.read().decode("utf8")
+    TestPDB.flush(child)
+    assert child.exitstatus == 0, rest

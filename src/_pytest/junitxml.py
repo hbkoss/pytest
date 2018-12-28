@@ -8,14 +8,18 @@ Based on initial code from Ross Lawley.
 Output conforms to https://github.com/jenkinsci/xunit-plugin/blob/master/
 src/main/resources/org/jenkinsci/plugins/xunit/types/model/xsd/junit-10.xsd
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import functools
-import py
 import os
 import re
 import sys
 import time
+
+import py
+
 import pytest
 from _pytest import nodes
 from _pytest.config import filename_arg
@@ -38,7 +42,7 @@ class Junit(py.xml.Namespace):
 # this dynamically instead of hardcoding it.  The spec range of valid
 # chars is: Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
 #                    | [#x10000-#x10FFFF]
-_legal_chars = (0x09, 0x0A, 0x0d)
+_legal_chars = (0x09, 0x0A, 0x0D)
 _legal_ranges = ((0x20, 0x7E), (0x80, 0xD7FF), (0xE000, 0xFFFD), (0x10000, 0x10FFFF))
 _legal_xml_re = [
     unicode("%s-%s") % (unichr(low), unichr(high))
@@ -221,12 +225,14 @@ class _NodeReporter(object):
         else:
             filename, lineno, skipreason = report.longrepr
             if skipreason.startswith("Skipped: "):
-                skipreason = bin_xml_escape(skipreason[9:])
+                skipreason = skipreason[9:]
+            details = "%s:%s: %s" % (filename, lineno, skipreason)
+
             self.append(
                 Junit.skipped(
-                    "%s:%s: %s" % (filename, lineno, skipreason),
+                    bin_xml_escape(details),
                     type="pytest.skip",
-                    message=skipreason,
+                    message=bin_xml_escape(skipreason),
                 )
             )
             self.write_captured_output(report)
@@ -258,12 +264,11 @@ def record_property(request):
 
 
 @pytest.fixture
-def record_xml_property(record_property):
+def record_xml_property(record_property, request):
     """(Deprecated) use record_property."""
-    import warnings
     from _pytest import deprecated
 
-    warnings.warn(deprecated.RECORD_XML_PROPERTY, DeprecationWarning, stacklevel=2)
+    request.node.warn(deprecated.RECORD_XML_PROPERTY)
 
     return record_property
 
@@ -274,9 +279,9 @@ def record_xml_attribute(request):
     The fixture is callable with ``(name, value)``, with value being
     automatically xml-encoded
     """
-    request.node.warn(
-        code="C3", message="record_xml_attribute is an experimental feature"
-    )
+    from _pytest.warning_types import PytestWarning
+
+    request.node.warn(PytestWarning("record_xml_attribute is an experimental feature"))
     xml = getattr(request.config, "_xml", None)
     if xml is not None:
         node_reporter = xml.node_reporter(request.node.nodeid)

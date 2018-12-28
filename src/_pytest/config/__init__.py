@@ -1,33 +1,39 @@
 """ command line options, ini-file and conftest.py processing. """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import argparse
+import copy
 import inspect
+import os
 import shlex
-import traceback
+import sys
 import types
 import warnings
-import copy
-import six
-import py
 
-# DON't import pytest here because it causes import cycle troubles
-import sys
-import os
-from _pytest.outcomes import Skipped
+import py
+import six
+from pkg_resources import parse_version
+from pluggy import HookimplMarker
+from pluggy import HookspecMarker
+from pluggy import PluginManager
 
 import _pytest._code
-import _pytest.hookspec  # the extension point definitions
 import _pytest.assertion
-from pluggy import PluginManager, HookimplMarker, HookspecMarker
+import _pytest.hookspec  # the extension point definitions
+from .exceptions import PrintHelp
+from .exceptions import UsageError
+from .findpaths import determine_setup
+from .findpaths import exists
+from _pytest._code import ExceptionInfo
+from _pytest._code import filter_traceback
+from _pytest.compat import lru_cache
 from _pytest.compat import safe_str
-from .exceptions import UsageError, PrintHelp
-from .findpaths import determine_setup, exists
+from _pytest.outcomes import Skipped
 
 hookimpl = HookimplMarker("pytest")
 hookspec = HookspecMarker("pytest")
-
-# pytest startup
-#
 
 
 class ConftestImportFailure(Exception):
@@ -35,12 +41,6 @@ class ConftestImportFailure(Exception):
         Exception.__init__(self, path, excinfo)
         self.path = path
         self.excinfo = excinfo
-
-    def __str__(self):
-        etype, evalue, etb = self.excinfo
-        formatted = traceback.format_tb(etb)
-        # The level of the tracebacks we want to print is hand crafted :(
-        return repr(evalue) + "\n" + "".join(formatted[2:])
 
 
 def main(args=None, plugins=None):
@@ -51,14 +51,26 @@ def main(args=None, plugins=None):
     :arg plugins: list of plugin objects to be auto-registered during
                   initialization.
     """
+    from _pytest.main import EXIT_USAGEERROR
+
     try:
         try:
             config = _prepareconfig(args, plugins)
         except ConftestImportFailure as e:
+            exc_info = ExceptionInfo(e.excinfo)
             tw = py.io.TerminalWriter(sys.stderr)
-            for line in traceback.format_exception(*e.excinfo):
+            tw.line(
+                "ImportError while loading conftest '{e.path}'.".format(e=e), red=True
+            )
+            exc_info.traceback = exc_info.traceback.filter(filter_traceback)
+            exc_repr = (
+                exc_info.getrepr(style="short", chain=False)
+                if exc_info.traceback
+                else exc_info.exconly()
+            )
+            formatted_tb = safe_str(exc_repr)
+            for line in formatted_tb.splitlines():
                 tw.line(line.rstrip(), red=True)
-            tw.line("ERROR: could not load %s\n" % (e.path,), red=True)
             return 4
         else:
             try:
@@ -69,7 +81,7 @@ def main(args=None, plugins=None):
         tw = py.io.TerminalWriter(sys.stderr)
         for msg in e.args:
             tw.line("ERROR: {}\n".format(msg), red=True)
-        return 4
+        return EXIT_USAGEERROR
 
 
 class cmdline(object):  # compatibility namespace
@@ -123,6 +135,7 @@ default_plugins = (
     "freeze_support",
     "setuponly",
     "setupplan",
+    "stepwise",
     "warnings",
     "logging",
 )
@@ -176,7 +189,9 @@ def _prepareconfig(args=None, plugins=None):
                 else:
                     pluginmanager.register(plugin)
         if warning:
-            config.warn("C1", warning)
+            from _pytest.warnings import _issue_config_warning
+
+            _issue_config_warning(warning, config=config, stacklevel=4)
         return pluginmanager.hook.pytest_cmdline_parse(
             pluginmanager=pluginmanager, args=args
         )
@@ -200,7 +215,7 @@ class PytestPluginManager(PluginManager):
         self._conftest_plugins = set()
 
         # state related to local conftest plugins
-        self._path2confmods = {}
+        self._dirpath2confmods = {}
         self._conftestpath2mod = {}
         self._confcutdir = None
         self._noconftest = False
@@ -347,6 +362,7 @@ class PytestPluginManager(PluginManager):
             else None
         )
         self._noconftest = namespace.noconftest
+        self._using_pyargs = namespace.pyargs
         testpaths = namespace.file_or_dir
         foundanchor = False
         for path in testpaths:
@@ -370,29 +386,35 @@ class PytestPluginManager(PluginManager):
                 if x.check(dir=1):
                     self._getconftestmodules(x)
 
+    @lru_cache(maxsize=128)
     def _getconftestmodules(self, path):
         if self._noconftest:
             return []
-        try:
-            return self._path2confmods[path]
-        except KeyError:
-            if path.isfile():
-                clist = self._getconftestmodules(path.dirpath())
-            else:
-                # XXX these days we may rather want to use config.rootdir
-                # and allow users to opt into looking into the rootdir parent
-                # directories instead of requiring to specify confcutdir
-                clist = []
-                for parent in path.parts():
-                    if self._confcutdir and self._confcutdir.relto(parent):
-                        continue
-                    conftestpath = parent.join("conftest.py")
-                    if conftestpath.isfile():
-                        mod = self._importconftest(conftestpath)
-                        clist.append(mod)
 
-            self._path2confmods[path] = clist
-            return clist
+        if path.isfile():
+            directory = path.dirpath()
+        else:
+            directory = path
+
+        if six.PY2:  # py2 is not using lru_cache.
+            try:
+                return self._dirpath2confmods[directory]
+            except KeyError:
+                pass
+
+        # XXX these days we may rather want to use config.rootdir
+        # and allow users to opt into looking into the rootdir parent
+        # directories instead of requiring to specify confcutdir
+        clist = []
+        for parent in directory.realpath().parts():
+            if self._confcutdir and self._confcutdir.relto(parent):
+                continue
+            conftestpath = parent.join("conftest.py")
+            if conftestpath.isfile():
+                mod = self._importconftest(conftestpath)
+                clist.append(mod)
+        self._dirpath2confmods[directory] = clist
+        return clist
 
     def _rget_with_confmod(self, name, path):
         modules = self._getconftestmodules(path)
@@ -412,20 +434,29 @@ class PytestPluginManager(PluginManager):
                 _ensure_removed_sysmodule(conftestpath.purebasename)
             try:
                 mod = conftestpath.pyimport()
-                if hasattr(mod, "pytest_plugins") and self._configured:
+                if (
+                    hasattr(mod, "pytest_plugins")
+                    and self._configured
+                    and not self._using_pyargs
+                ):
                     from _pytest.deprecated import (
                         PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST
                     )
 
-                    warnings.warn(PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST)
+                    warnings.warn_explicit(
+                        PYTEST_PLUGINS_FROM_NON_TOP_LEVEL_CONFTEST,
+                        category=None,
+                        filename=str(conftestpath),
+                        lineno=0,
+                    )
             except Exception:
                 raise ConftestImportFailure(conftestpath, sys.exc_info())
 
             self._conftest_plugins.add(mod)
             self._conftestpath2mod[conftestpath] = mod
             dirpath = conftestpath.dirpath()
-            if dirpath in self._path2confmods:
-                for path, mods in self._path2confmods.items():
+            if dirpath in self._dirpath2confmods:
+                for path, mods in self._dirpath2confmods.items():
                     if path and path.relto(dirpath) or path == dirpath:
                         assert mod not in mods
                         mods.append(mod)
@@ -446,6 +477,11 @@ class PytestPluginManager(PluginManager):
     def consider_pluginarg(self, arg):
         if arg.startswith("no:"):
             name = arg[3:]
+            # PR #4304 : remove stepwise if cacheprovider is blocked
+            if name == "cacheprovider":
+                self.set_blocked("stepwise")
+                self.set_blocked("pytest_stepwise")
+
             self.set_blocked(name)
             if not name.startswith("pytest_"):
                 self.set_blocked("pytest_" + name)
@@ -602,7 +638,29 @@ class Config(object):
             fin()
 
     def warn(self, code, message, fslocation=None, nodeid=None):
-        """ generate a warning for this test session. """
+        """
+        .. deprecated:: 3.8
+
+            Use :py:func:`warnings.warn` or :py:func:`warnings.warn_explicit` directly instead.
+
+        Generate a warning for this test session.
+        """
+        from _pytest.warning_types import RemovedInPytest4Warning
+
+        if isinstance(fslocation, (tuple, list)) and len(fslocation) > 2:
+            filename, lineno = fslocation[:2]
+        else:
+            filename = "unknown file"
+            lineno = 0
+        msg = "config.warn has been deprecated, use warnings.warn instead"
+        if nodeid:
+            msg = "{}: {}".format(nodeid, msg)
+        warnings.warn_explicit(
+            RemovedInPytest4Warning(msg),
+            category=None,
+            filename=filename,
+            lineno=lineno,
+        )
         self.hook.pytest_logwarning.call_historic(
             kwargs=dict(
                 code=code, message=message, fslocation=fslocation, nodeid=nodeid
@@ -667,8 +725,8 @@ class Config(object):
         r = determine_setup(
             ns.inifilename,
             ns.file_or_dir + unknown_args,
-            warnfunc=self.warn,
             rootdir_cmd_arg=ns.rootdir or None,
+            config=self,
         )
         self.rootdir, self.inifile, self.inicfg = r
         self._parser.extra_info["rootdir"] = self.rootdir
@@ -706,6 +764,10 @@ class Config(object):
 
         self.pluginmanager.rewrite_hook = hook
 
+        if os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+            # We don't autoload from setuptools entry points, no need to continue.
+            return
+
         # 'RECORD' available for plugins installed normally (pip install)
         # 'SOURCES.txt' available for plugins installed in dev mode (pip install -e)
         # for installed plugins 'SOURCES.txt' returns an empty list, and vice-versa
@@ -722,16 +784,28 @@ class Config(object):
         for name in _iter_rewritable_modules(package_files):
             hook.mark_rewrite(name)
 
+    def _validate_args(self, args):
+        """Validate known args."""
+        self._parser.parse_known_and_unknown_args(
+            args, namespace=copy.copy(self.option)
+        )
+        return args
+
     def _preparse(self, args, addopts=True):
         if addopts:
-            args[:] = shlex.split(os.environ.get("PYTEST_ADDOPTS", "")) + args
+            env_addopts = os.environ.get("PYTEST_ADDOPTS", "")
+            if len(env_addopts):
+                args[:] = self._validate_args(shlex.split(env_addopts)) + args
         self._initini(args)
         if addopts:
-            args[:] = self.getini("addopts") + args
+            args[:] = self._validate_args(self.getini("addopts")) + args
         self._checkversion()
         self._consider_importhook(args)
         self.pluginmanager.consider_preparse(args)
-        self.pluginmanager.load_setuptools_entrypoints("pytest11")
+        if not os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+            # Don't autoload from setuptools entry point. Only explicitly specified
+            # plugins are going to be loaded.
+            self.pluginmanager.load_setuptools_entrypoints("pytest11")
         self.pluginmanager.consider_env()
         self.known_args_namespace = ns = self._parser.parse_known_args(
             args, namespace=copy.copy(self.option)
@@ -757,9 +831,7 @@ class Config(object):
 
         minver = self.inicfg.get("minversion", None)
         if minver:
-            ver = minver.split(".")
-            myver = pytest.__version__.split(".")
-            if myver < ver:
+            if parse_version(minver) > parse_version(pytest.__version__):
                 raise pytest.UsageError(
                     "%s:%d: requires pytest-%s, actual pytest-%s'"
                     % (
@@ -788,11 +860,10 @@ class Config(object):
                 args, self.option, namespace=self.option
             )
             if not args:
-                cwd = os.getcwd()
-                if cwd == self.rootdir:
+                if self.invocation_dir == self.rootdir:
                     args = self.getini("testpaths")
                 if not args:
-                    args = [cwd]
+                    args = [str(self.invocation_dir)]
             self.args = args
         except PrintHelp:
             pass

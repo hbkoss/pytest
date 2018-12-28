@@ -84,6 +84,12 @@ pytest.warns
 .. autofunction:: pytest.warns(expected_warning: Exception, [match])
     :with:
 
+pytest.freeze_includes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Tutorial**: :ref:`freezing-pytest`.
+
+.. autofunction:: pytest.freeze_includes
 
 .. _`marks ref`:
 
@@ -111,6 +117,7 @@ Add warning filters to marked test items.
         A *warning specification string*, which is composed of contents of the tuple ``(action, message, category, module, lineno)``
         as specified in `The Warnings filter <https://docs.python.org/3/library/warnings.html#warning-filter>`_ section of
         the Python documentation, separated by ``":"``. Optional fields can be omitted.
+        Module names passed for filtering are not regex-escaped.
 
         For example:
 
@@ -172,7 +179,7 @@ Mark a test function as using the given fixture names.
 
 .. warning::
 
-    This mark can be used with *test functions* only, having no affect when applied
+    This mark has no effect when applied
     to a **fixture** function.
 
 .. py:function:: pytest.mark.usefixtures(*names)
@@ -460,7 +467,7 @@ To use it, include in your top-most ``conftest.py`` file::
 
 
 .. autoclass:: Testdir()
-    :members: runpytest,runpytest_subprocess,runpytest_inprocess,makeconftest,makepyfile
+    :members:
 
 .. autoclass:: RunResult()
     :members:
@@ -611,6 +618,8 @@ Session related reporting hooks:
 .. autofunction:: pytest_terminal_summary
 .. autofunction:: pytest_fixture_setup
 .. autofunction:: pytest_fixture_post_finalizer
+.. autofunction:: pytest_logwarning
+.. autofunction:: pytest_warning_captured
 
 And here is the central hook for reporting about
 test execution:
@@ -866,6 +875,11 @@ Contains comma-separated list of modules that should be loaded as plugins:
 
     export PYTEST_PLUGINS=mymodule.plugin,xdist
 
+PYTEST_DISABLE_PLUGIN_AUTOLOAD
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When set, disables plugin auto-loading through setuptools entrypoints. Only explicitly specified plugins will be
+loaded.
 
 PYTEST_CURRENT_TEST
 ~~~~~~~~~~~~~~~~~~~
@@ -935,6 +949,7 @@ passed multiple times. The expected format is ``name=value``. For example::
 
    * ``classic``: classic pytest output.
    * ``progress``: like classic pytest output, but with a progress indicator.
+   * ``count``: like progress, but shows progress as the number of tests completed instead of a percent.
 
    The default is ``progress``, but you can fallback to ``classic`` if you prefer or
    the new mode is causing unexpected problems:
@@ -968,6 +983,7 @@ passed multiple times. The expected format is ``name=value``. For example::
 
     * ``skip`` skips tests with an empty parameterset (default)
     * ``xfail`` marks tests with an empty parameterset as xfail(run=False)
+    * ``fail_at_collect`` raises an exception if parametrize collects an empty parameter set
 
     .. code-block:: ini
 
@@ -1229,7 +1245,8 @@ passed multiple times. The expected format is ``name=value``. For example::
 .. confval:: python_classes
 
    One or more name prefixes or glob-style patterns determining which classes
-   are considered for test collection. By default, pytest will consider any
+   are considered for test collection. Search for multiple glob patterns by
+   adding a space between patterns. By default, pytest will consider any
    class prefixed with ``Test`` as a test collection.  Here is an example of how
    to collect tests from classes that end in ``Suite``:
 
@@ -1246,15 +1263,33 @@ passed multiple times. The expected format is ``name=value``. For example::
 .. confval:: python_files
 
    One or more Glob-style file patterns determining which python files
-   are considered as test modules. By default, pytest will consider
-   any file matching with ``test_*.py`` and ``*_test.py`` globs as a test
-   module.
+   are considered as test modules. Search for multiple glob patterns by
+   adding a space between patterns:
+
+   .. code-block:: ini
+
+        [pytest]
+        python_files = test_*.py check_*.py example_*.py
+
+   Or one per line:
+
+   .. code-block:: ini
+
+        [pytest]
+        python_files =
+            test_*.py
+            check_*.py
+            example_*.py
+
+   By default, files matching ``test_*.py`` and ``*_test.py`` will be considered
+   test modules.
 
 
 .. confval:: python_functions
 
    One or more name prefixes or glob-patterns determining which test functions
-   and methods are considered tests. By default, pytest will consider any
+   and methods are considered tests. Search for multiple glob patterns by
+   adding a space between patterns. By default, pytest will consider any
    function prefixed with ``test`` as a test.  Here is an example of how
    to collect test functions and methods that end in ``_test``:
 

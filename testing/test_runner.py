@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-import _pytest._code
 import inspect
 import os
-import py
-import pytest
 import sys
 import types
-from _pytest import runner, main, outcomes, reports
+
+import py
+
+import _pytest._code
+import pytest
+from _pytest import main
+from _pytest import outcomes
+from _pytest import reports
+from _pytest import runner
 
 
 class TestSetupState(object):
@@ -484,11 +491,24 @@ def test_callinfo():
     assert ci.when == "123"
     assert ci.result == 0
     assert "result" in repr(ci)
+    assert repr(ci) == "<CallInfo when='123' result: 0>"
+
     ci = runner.CallInfo(lambda: 0 / 0, "123")
     assert ci.when == "123"
     assert not hasattr(ci, "result")
+    assert repr(ci) == "<CallInfo when='123' exception: division by zero>"
     assert ci.excinfo
     assert "exc" in repr(ci)
+
+
+def test_callinfo_repr_while_running():
+    def repr_while_running():
+        f = sys._getframe().f_back
+        assert "func" in f.f_locals
+        assert repr(f.f_locals["self"]) == "<CallInfo when='when' result: '<NOTSET>'>"
+
+    ci = runner.CallInfo(repr_while_running, "when")
+    assert repr(ci) == "<CallInfo when='when' result: None>"
 
 
 # design question: do we want general hooks in python files?
@@ -570,7 +590,20 @@ def test_pytest_exit_msg(testdir):
     result.stderr.fnmatch_lines(["Exit: oh noes"])
 
 
-def test_pytest_fail_notrace(testdir):
+def test_pytest_exit_returncode(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+        def test_foo():
+            pytest.exit("some exit msg", 99)
+    """
+    )
+    result = testdir.runpytest()
+    assert result.ret == 99
+
+
+def test_pytest_fail_notrace_runtest(testdir):
+    """Test pytest.fail(..., pytrace=False) does not show tracebacks during test run."""
     testdir.makepyfile(
         """
         import pytest
@@ -583,6 +616,21 @@ def test_pytest_fail_notrace(testdir):
     result = testdir.runpytest()
     result.stdout.fnmatch_lines(["world", "hello"])
     assert "def teardown_function" not in result.stdout.str()
+
+
+def test_pytest_fail_notrace_collection(testdir):
+    """Test pytest.fail(..., pytrace=False) does not show tracebacks during collection."""
+    testdir.makepyfile(
+        """
+        import pytest
+        def some_internal_function():
+            pytest.fail("hello", pytrace=False)
+        some_internal_function()
+    """
+    )
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["hello"])
+    assert "def some_internal_function()" not in result.stdout.str()
 
 
 @pytest.mark.parametrize("str_prefix", ["u", ""])

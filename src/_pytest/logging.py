@@ -1,14 +1,18 @@
 """ Access and control log capturing. """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import logging
-from contextlib import closing, contextmanager
 import re
+from contextlib import contextmanager
+
+import py
 import six
 
-from _pytest.config import create_terminal_writer
 import pytest
-import py
+from _pytest.compat import dummy_context_manager
+from _pytest.config import create_terminal_writer
 
 
 DEFAULT_LOG_FORMAT = "%(filename)-25s %(lineno)4d %(levelname)-8s %(message)s"
@@ -212,7 +216,8 @@ class LogCaptureFixture(object):
     def __init__(self, item):
         """Creates a new funcarg."""
         self._item = item
-        self._initial_log_levels = {}  # type: Dict[str, int] # dict of log name -> log level
+        # dict of log name -> log level
+        self._initial_log_levels = {}  # type: Dict[str, int]
 
     def _finalize(self):
         """Finalizes the fixture.
@@ -261,7 +266,7 @@ class LogCaptureFixture(object):
 
     @property
     def record_tuples(self):
-        """Returns a list of a striped down version of log records intended
+        """Returns a list of a stripped down version of log records intended
         for use in assertion comparison.
 
         The format of the tuple is:
@@ -277,7 +282,7 @@ class LogCaptureFixture(object):
         Unlike 'records', which contains the format string and parameters for interpolation, log messages in this list
         are all interpolated.
         Unlike 'text', which contains the output from the handler, log messages in this list are unadorned with
-        levels, timestamps, etc, making exact comparisions more reliable.
+        levels, timestamps, etc, making exact comparisons more reliable.
 
         Note that traceback or stack info (from :func:`logging.exception` or the `exc_info` or `stack_info` arguments
         to the logging functions) is not included, as this is added by the formatter in the handler.
@@ -328,7 +333,7 @@ class LogCaptureFixture(object):
 def caplog(request):
     """Access and control log capturing.
 
-    Captured logs are available through the following methods::
+    Captured logs are available through the following properties/methods::
 
     * caplog.text            -> string containing formatted log output
     * caplog.records         -> list of logging.LogRecord instances
@@ -367,11 +372,6 @@ def get_actual_log_level(config, *setting_names):
 
 def pytest_configure(config):
     config.pluginmanager.register(LoggingPlugin(config), "logging-plugin")
-
-
-@contextmanager
-def _dummy_context_manager():
-    yield
 
 
 class LoggingPlugin(object):
@@ -418,7 +418,6 @@ class LoggingPlugin(object):
         else:
             self.log_file_handler = None
 
-        # initialized during pytest_runtestloop
         self.log_cli_handler = None
 
     def _log_cli_enabled(self):
@@ -428,6 +427,22 @@ class LoggingPlugin(object):
         return self._config.getoption(
             "--log-cli-level"
         ) is not None or self._config.getini("log_cli")
+
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_collection(self):
+        # This has to be called before the first log message is logged,
+        # so we can access the terminal reporter plugin.
+        self._setup_cli_logging()
+
+        with self.live_logs_context():
+            if self.log_cli_handler:
+                self.log_cli_handler.set_when("collection")
+
+            if self.log_file_handler is not None:
+                with catching_logs(self.log_file_handler, level=self.log_file_level):
+                    yield
+            else:
+                yield
 
     @contextmanager
     def _runtest_for(self, item, when):
@@ -449,8 +464,8 @@ class LoggingPlugin(object):
             try:
                 yield  # run test
             finally:
-                del item.catch_log_handler
                 if when == "teardown":
+                    del item.catch_log_handler
                     del item.catch_log_handlers
 
             if self.print_logs:
@@ -485,25 +500,41 @@ class LoggingPlugin(object):
         with self._runtest_for(None, "finish"):
             yield
 
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_sessionfinish(self):
+        with self.live_logs_context():
+            if self.log_cli_handler:
+                self.log_cli_handler.set_when("sessionfinish")
+            if self.log_file_handler is not None:
+                with catching_logs(self.log_file_handler, level=self.log_file_level):
+                    yield
+            else:
+                yield
+
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_sessionstart(self):
+        self._setup_cli_logging()
+        with self.live_logs_context():
+            if self.log_cli_handler:
+                self.log_cli_handler.set_when("sessionstart")
+            if self.log_file_handler is not None:
+                with catching_logs(self.log_file_handler, level=self.log_file_level):
+                    yield
+            else:
+                yield
+
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtestloop(self, session):
         """Runs all collected test items."""
-        self._setup_cli_logging()
-        with self.live_logs_context:
+        with self.live_logs_context():
             if self.log_file_handler is not None:
-                with closing(self.log_file_handler):
-                    with catching_logs(
-                        self.log_file_handler, level=self.log_file_level
-                    ):
-                        yield  # run all the tests
+                with catching_logs(self.log_file_handler, level=self.log_file_level):
+                    yield  # run all the tests
             else:
                 yield  # run all the tests
 
     def _setup_cli_logging(self):
-        """Sets up the handler and logger for the Live Logs feature, if enabled.
-
-        This must be done right before starting the loop so we can access the terminal reporter plugin.
-        """
+        """Sets up the handler and logger for the Live Logs feature, if enabled."""
         terminal_reporter = self._config.pluginmanager.get_plugin("terminalreporter")
         if self._log_cli_enabled() and terminal_reporter is not None:
             capture_manager = self._config.pluginmanager.get_plugin("capturemanager")
@@ -533,11 +564,14 @@ class LoggingPlugin(object):
                 self._config, "log_cli_level", "log_level"
             )
             self.log_cli_handler = log_cli_handler
-            self.live_logs_context = catching_logs(
+            self.live_logs_context = lambda: catching_logs(
                 log_cli_handler, formatter=log_cli_formatter, level=log_cli_level
             )
         else:
-            self.live_logs_context = _dummy_context_manager()
+            self.live_logs_context = lambda: dummy_context_manager()
+        # Note that the lambda for the live_logs_context is needed because
+        # live_logs_context can otherwise not be entered multiple times due
+        # to limitations of contextlib.contextmanager
 
 
 class _LiveLoggingStreamHandler(logging.StreamHandler):
@@ -572,9 +606,12 @@ class _LiveLoggingStreamHandler(logging.StreamHandler):
             self._test_outcome_written = False
 
     def emit(self, record):
-        if self.capture_manager is not None:
-            self.capture_manager.suspend_global_capture()
-        try:
+        ctx_manager = (
+            self.capture_manager.global_and_fixture_disabled()
+            if self.capture_manager
+            else dummy_context_manager()
+        )
+        with ctx_manager:
             if not self._first_record_emitted:
                 self.stream.write("\n")
                 self._first_record_emitted = True
@@ -586,6 +623,3 @@ class _LiveLoggingStreamHandler(logging.StreamHandler):
                 self.stream.section("live log " + self._when, sep="-", bold=True)
                 self._section_name_shown = True
             logging.StreamHandler.emit(self, record)
-        finally:
-            if self.capture_manager is not None:
-                self.capture_manager.resume_global_capture()

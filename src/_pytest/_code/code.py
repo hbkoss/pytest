@@ -1,16 +1,27 @@
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import inspect
 import pprint
+import re
 import sys
 import traceback
-from inspect import CO_VARARGS, CO_VARKEYWORDS
+from inspect import CO_VARARGS
+from inspect import CO_VARKEYWORDS
+from weakref import ref
 
 import attr
-import re
-from weakref import ref
-from _pytest.compat import _PY2, _PY3, PY35, safe_str
-from six import text_type
+import pluggy
 import py
+import six
+from six import text_type
+
+import _pytest
+from _pytest.compat import _PY2
+from _pytest.compat import _PY3
+from _pytest.compat import PY35
+from _pytest.compat import safe_str
 
 builtin_repr = repr
 
@@ -128,7 +139,7 @@ class Frame(object):
         """
         f_locals = self.f_locals.copy()
         f_locals.update(vars)
-        py.builtin.exec_(code, self.f_globals, f_locals)
+        six.exec_(code, self.f_globals, f_locals)
 
     def repr(self, object):
         """ return a 'safe' (non-recursive, one-line) string repr for 'object'
@@ -414,7 +425,10 @@ class ExceptionInfo(object):
         self.traceback = _pytest._code.Traceback(self.tb, excinfo=ref(self))
 
     def __repr__(self):
-        return "<ExceptionInfo %s tblen=%d>" % (self.typename, len(self.traceback))
+        try:
+            return "<ExceptionInfo %s tblen=%d>" % (self.typename, len(self.traceback))
+        except AttributeError:
+            return "<ExceptionInfo uninitialized>"
 
     def exconly(self, tryshort=False):
         """ return the exception as a string
@@ -450,13 +464,35 @@ class ExceptionInfo(object):
         tbfilter=True,
         funcargs=False,
         truncate_locals=True,
+        chain=True,
     ):
-        """ return str()able representation of this exception info.
-            showlocals: show locals per traceback entry
-            style: long|short|no|native traceback style
-            tbfilter: hide entries (where __tracebackhide__ is true)
+        """
+        Return str()able representation of this exception info.
 
-            in case of style==native, tbfilter and showlocals is ignored.
+        :param bool showlocals:
+            Show locals per traceback entry.
+            Ignored if ``style=="native"``.
+
+        :param str style: long|short|no|native traceback style
+
+        :param bool abspath:
+            If paths should be changed to absolute or left unchanged.
+
+        :param bool tbfilter:
+            Hide entries that contain a local variable ``__tracebackhide__==True``.
+            Ignored if ``style=="native"``.
+
+        :param bool funcargs:
+            Show fixtures ("funcargs" for legacy purposes) per traceback entry.
+
+        :param bool truncate_locals:
+            With ``showlocals==True``, make sure locals can be safely represented as strings.
+
+        :param bool chain: if chained exceptions in Python 3 should be shown.
+
+        .. versionchanged:: 3.9
+
+            Added the ``chain`` parameter.
         """
         if style == "native":
             return ReprExceptionInfo(
@@ -475,13 +511,18 @@ class ExceptionInfo(object):
             tbfilter=tbfilter,
             funcargs=funcargs,
             truncate_locals=truncate_locals,
+            chain=chain,
         )
         return fmt.repr_excinfo(self)
 
     def __str__(self):
-        entry = self.traceback[-1]
-        loc = ReprFileLocation(entry.path, entry.lineno + 1, self.exconly())
-        return str(loc)
+        try:
+            entry = self.traceback[-1]
+        except AttributeError:
+            return repr(self)
+        else:
+            loc = ReprFileLocation(entry.path, entry.lineno + 1, self.exconly())
+            return str(loc)
 
     def __unicode__(self):
         entry = self.traceback[-1]
@@ -515,6 +556,7 @@ class FormattedExcinfo(object):
     tbfilter = attr.ib(default=True)
     funcargs = attr.ib(default=False)
     truncate_locals = attr.ib(default=True)
+    chain = attr.ib(default=True)
     astcache = attr.ib(default=attr.Factory(dict), init=False, repr=False)
 
     def _getindent(self, source):
@@ -719,7 +761,9 @@ class FormattedExcinfo(object):
             repr_chain = []
             e = excinfo.value
             descr = None
-            while e is not None:
+            seen = set()
+            while e is not None and id(e) not in seen:
+                seen.add(id(e))
                 if excinfo:
                     reprtraceback = self.repr_traceback(excinfo)
                     reprcrash = excinfo._getreprcrash()
@@ -732,7 +776,7 @@ class FormattedExcinfo(object):
                     reprcrash = None
 
                 repr_chain += [(reprtraceback, reprcrash, descr)]
-                if e.__cause__ is not None:
+                if e.__cause__ is not None and self.chain:
                     e = e.__cause__
                     excinfo = (
                         ExceptionInfo((type(e), e, e.__traceback__))
@@ -740,7 +784,11 @@ class FormattedExcinfo(object):
                         else None
                     )
                     descr = "The above exception was the direct cause of the following exception:"
-                elif e.__context__ is not None and not e.__suppress_context__:
+                elif (
+                    e.__context__ is not None
+                    and not e.__suppress_context__
+                    and self.chain
+                ):
                     e = e.__context__
                     excinfo = (
                         ExceptionInfo((type(e), e, e.__traceback__))
@@ -976,3 +1024,36 @@ else:
             return "maximum recursion depth exceeded" in str(excinfo.value)
         except UnicodeError:
             return False
+
+
+# relative paths that we use to filter traceback entries from appearing to the user;
+# see filter_traceback
+# note: if we need to add more paths than what we have now we should probably use a list
+# for better maintenance
+
+_PLUGGY_DIR = py.path.local(pluggy.__file__.rstrip("oc"))
+# pluggy is either a package or a single module depending on the version
+if _PLUGGY_DIR.basename == "__init__.py":
+    _PLUGGY_DIR = _PLUGGY_DIR.dirpath()
+_PYTEST_DIR = py.path.local(_pytest.__file__).dirpath()
+_PY_DIR = py.path.local(py.__file__).dirpath()
+
+
+def filter_traceback(entry):
+    """Return True if a TracebackEntry instance should be removed from tracebacks:
+    * dynamically generated code (no code to show up for it);
+    * internal traceback from pytest or its internal libraries, py and pluggy.
+    """
+    # entry.path might sometimes return a str object when the entry
+    # points to dynamically generated code
+    # see https://bitbucket.org/pytest-dev/py/issues/71
+    raw_filename = entry.frame.code.raw.co_filename
+    is_generated = "<" in raw_filename and ">" in raw_filename
+    if is_generated:
+        return False
+    # entry.path might point to a non-existing file, in which case it will
+    # also return a str object. see #1133
+    p = py.path.local(entry.path)
+    return (
+        not p.relto(_PLUGGY_DIR) and not p.relto(_PYTEST_DIR) and not p.relto(_PY_DIR)
+    )

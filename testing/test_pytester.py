@@ -1,14 +1,24 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
-import py.path
-import pytest
 import sys
+import time
+
+import py.path
+
 import _pytest.pytester as pytester
-from _pytest.pytester import HookRecorder
-from _pytest.pytester import CwdSnapshot, SysModulesSnapshot, SysPathsSnapshot
+import pytest
 from _pytest.config import PytestPluginManager
-from _pytest.main import EXIT_OK, EXIT_TESTSFAILED
+from _pytest.main import EXIT_NOTESTSCOLLECTED
+from _pytest.main import EXIT_OK
+from _pytest.main import EXIT_TESTSFAILED
+from _pytest.pytester import CwdSnapshot
+from _pytest.pytester import HookRecorder
+from _pytest.pytester import SysModulesSnapshot
+from _pytest.pytester import SysPathsSnapshot
 
 
 def test_make_hook_recorder(testdir):
@@ -83,6 +93,57 @@ def test_testdir_runs_with_plugin(testdir):
     result.assert_outcomes(passed=1)
 
 
+def test_runresult_assertion_on_xfail(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        pytest_plugins = "pytester"
+
+        @pytest.mark.xfail
+        def test_potato():
+            assert False
+    """
+    )
+    result = testdir.runpytest()
+    result.assert_outcomes(xfailed=1)
+    assert result.ret == 0
+
+
+def test_runresult_assertion_on_xpassed(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        pytest_plugins = "pytester"
+
+        @pytest.mark.xfail
+        def test_potato():
+            assert True
+    """
+    )
+    result = testdir.runpytest()
+    result.assert_outcomes(xpassed=1)
+    assert result.ret == 0
+
+
+def test_xpassed_with_strict_is_considered_a_failure(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        pytest_plugins = "pytester"
+
+        @pytest.mark.xfail(strict=True)
+        def test_potato():
+            assert True
+    """
+    )
+    result = testdir.runpytest()
+    result.assert_outcomes(failed=1)
+    assert result.ret != 0
+
+
 def make_holder():
     class apiclass(object):
         def pytest_xyz(self, arg):
@@ -125,7 +186,7 @@ def test_makepyfile_unicode(testdir):
         unichr(65)
     except NameError:
         unichr = chr
-    testdir.makepyfile(unichr(0xfffd))
+    testdir.makepyfile(unichr(0xFFFD))
 
 
 def test_makepyfile_utf8(testdir):
@@ -213,57 +274,6 @@ class TestInlineRunModulesCleanup(object):
         )
         testdir.inline_run(str(test_mod))
         assert imported.data == 42
-
-
-def test_inline_run_clean_sys_paths(testdir):
-    def test_sys_path_change_cleanup(self, testdir):
-        test_path1 = testdir.tmpdir.join("boink1").strpath
-        test_path2 = testdir.tmpdir.join("boink2").strpath
-        test_path3 = testdir.tmpdir.join("boink3").strpath
-        sys.path.append(test_path1)
-        sys.meta_path.append(test_path1)
-        original_path = list(sys.path)
-        original_meta_path = list(sys.meta_path)
-        test_mod = testdir.makepyfile(
-            """
-            import sys
-            sys.path.append({:test_path2})
-            sys.meta_path.append({:test_path2})
-            def test_foo():
-                sys.path.append({:test_path3})
-                sys.meta_path.append({:test_path3})""".format(
-                locals()
-            )
-        )
-        testdir.inline_run(str(test_mod))
-        assert sys.path == original_path
-        assert sys.meta_path == original_meta_path
-
-    def spy_factory(self):
-        class SysPathsSnapshotSpy(object):
-            instances = []
-
-            def __init__(self):
-                SysPathsSnapshotSpy.instances.append(self)
-                self._spy_restore_count = 0
-                self.__snapshot = SysPathsSnapshot()
-
-            def restore(self):
-                self._spy_restore_count += 1
-                return self.__snapshot.restore()
-
-        return SysPathsSnapshotSpy
-
-    def test_inline_run_taking_and_restoring_a_sys_paths_snapshot(
-        self, testdir, monkeypatch
-    ):
-        spy_factory = self.spy_factory()
-        monkeypatch.setattr(pytester, "SysPathsSnapshot", spy_factory)
-        test_mod = testdir.makepyfile("def test_foo(): pass")
-        testdir.inline_run(str(test_mod))
-        assert len(spy_factory.instances) == 1
-        spy = spy_factory.instances[0]
-        assert spy._spy_restore_count == 1
 
 
 def test_assert_outcomes_after_pytest_error(testdir):
@@ -396,3 +406,39 @@ class TestSysPathsSnapshot(object):
 def test_testdir_subprocess(testdir):
     testfile = testdir.makepyfile("def test_one(): pass")
     assert testdir.runpytest_subprocess(testfile).ret == 0
+
+
+def test_unicode_args(testdir):
+    result = testdir.runpytest("-k", u"💩")
+    assert result.ret == EXIT_NOTESTSCOLLECTED
+
+
+def test_testdir_run_no_timeout(testdir):
+    testfile = testdir.makepyfile("def test_no_timeout(): pass")
+    assert testdir.runpytest_subprocess(testfile).ret == EXIT_OK
+
+
+def test_testdir_run_with_timeout(testdir):
+    testfile = testdir.makepyfile("def test_no_timeout(): pass")
+
+    timeout = 120
+
+    start = time.time()
+    result = testdir.runpytest_subprocess(testfile, timeout=timeout)
+    end = time.time()
+    duration = end - start
+
+    assert result.ret == EXIT_OK
+    assert duration < timeout
+
+
+def test_testdir_run_timeout_expires(testdir):
+    testfile = testdir.makepyfile(
+        """
+        import time
+
+        def test_timeout():
+            time.sleep(10)"""
+    )
+    with pytest.raises(testdir.TimeoutExpired):
+        testdir.runpytest_subprocess(testfile, timeout=1)

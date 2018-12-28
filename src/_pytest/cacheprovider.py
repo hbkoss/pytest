@@ -4,19 +4,23 @@ merged implementation of the cache provider
 the name cache was not chosen to ensure pluggy automatically
 ignores the external pytest-cache
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import json
+import os
 from collections import OrderedDict
 
+import attr
 import py
 import six
-import attr
 
 import pytest
-import json
-import shutil
-
-from . import paths
-from .compat import _PY2 as PY2, Path
+from .compat import _PY2 as PY2
+from .pathlib import Path
+from .pathlib import resolve_from_str
+from .pathlib import rmtree
 
 README_CONTENT = u"""\
 # pytest cache directory #
@@ -33,22 +37,29 @@ See [the docs](https://docs.pytest.org/en/latest/cache.html) for more informatio
 @attr.s
 class Cache(object):
     _cachedir = attr.ib(repr=False)
-    _warn = attr.ib(repr=False)
+    _config = attr.ib(repr=False)
 
     @classmethod
     def for_config(cls, config):
         cachedir = cls.cache_dir_from_config(config)
         if config.getoption("cacheclear") and cachedir.exists():
-            shutil.rmtree(str(cachedir))
+            rmtree(cachedir, force=True)
             cachedir.mkdir()
-        return cls(cachedir, config.warn)
+        return cls(cachedir, config)
 
     @staticmethod
     def cache_dir_from_config(config):
-        return paths.resolve_from_str(config.getini("cache_dir"), config.rootdir)
+        return resolve_from_str(config.getini("cache_dir"), config.rootdir)
 
     def warn(self, fmt, **args):
-        self._warn(code="I9", message=fmt.format(**args) if args else fmt)
+        from _pytest.warnings import _issue_config_warning
+        from _pytest.warning_types import PytestWarning
+
+        _issue_config_warning(
+            PytestWarning(fmt.format(**args) if args else fmt),
+            self._config,
+            stacklevel=3,
+        )
 
     def makedir(self, name):
         """ return a directory path object with the given name.  If the
@@ -99,6 +110,10 @@ class Cache(object):
         """
         path = self._getvaluepath(key)
         try:
+            if path.parent.is_dir():
+                cache_dir_exists_already = True
+            else:
+                cache_dir_exists_already = self._cachedir.exists()
             path.parent.mkdir(exist_ok=True, parents=True)
         except (IOError, OSError):
             self.warn("could not create cache path {path}", path=path)
@@ -110,14 +125,20 @@ class Cache(object):
         else:
             with f:
                 json.dump(value, f, indent=2, sort_keys=True)
-                self._ensure_readme()
+            if not cache_dir_exists_already:
+                self._ensure_supporting_files()
 
-    def _ensure_readme(self):
-
+    def _ensure_supporting_files(self):
+        """Create supporting files in the cache dir that are not really part of the cache."""
         if self._cachedir.is_dir():
             readme_path = self._cachedir / "README.md"
             if not readme_path.is_file():
                 readme_path.write_text(README_CONTENT)
+
+            gitignore_path = self._cachedir.joinpath(".gitignore")
+            if not gitignore_path.is_file():
+                msg = u"# Created by pytest automatically.\n*"
+                gitignore_path.write_text(msg, encoding="UTF-8")
 
 
 class LFPlugin(object):
@@ -132,17 +153,14 @@ class LFPlugin(object):
         self._no_failures_behavior = self.config.getoption("last_failed_no_failures")
 
     def pytest_report_collectionfinish(self):
-        if self.active:
+        if self.active and self.config.getoption("verbose") >= 0:
             if not self._previously_failed_count:
-                mode = "run {} (no recorded failures)".format(
-                    self._no_failures_behavior
-                )
-            else:
-                noun = "failure" if self._previously_failed_count == 1 else "failures"
-                suffix = " first" if self.config.getoption("failedfirst") else ""
-                mode = "rerun previous {count} {noun}{suffix}".format(
-                    count=self._previously_failed_count, suffix=suffix, noun=noun
-                )
+                return None
+            noun = "failure" if self._previously_failed_count == 1 else "failures"
+            suffix = " first" if self.config.getoption("failedfirst") else ""
+            mode = "rerun previous {count} {noun}{suffix}".format(
+                count=self._previously_failed_count, suffix=suffix, noun=noun
+            )
             return "run-last-failure: %s" % mode
 
     def pytest_runtest_logreport(self, report):
@@ -267,7 +285,10 @@ def pytest_addoption(parser):
         dest="cacheclear",
         help="remove all cache contents at start of test run.",
     )
-    parser.addini("cache_dir", default=".pytest_cache", help="cache directory path.")
+    cache_dir_default = ".pytest_cache"
+    if "TOX_ENV_DIR" in os.environ:
+        cache_dir_default = os.path.join(os.environ["TOX_ENV_DIR"], cache_dir_default)
+    parser.addini("cache_dir", default=cache_dir_default, help="cache directory path.")
     group.addoption(
         "--lfnf",
         "--last-failed-no-failures",
@@ -311,7 +332,8 @@ def cache(request):
 
 
 def pytest_report_header(config):
-    if config.option.verbose:
+    """Display cachedir with --cache-show and if non-default."""
+    if config.option.verbose or config.getini("cache_dir") != ".pytest_cache":
         cachedir = config.cache._cachedir
         # TODO: evaluate generating upward relative paths
         # starting with .., ../.. if sensible
@@ -339,7 +361,7 @@ def cacheshow(config, session):
         key = valpath.relative_to(vdir)
         val = config.cache.get(key, dummy)
         if val is dummy:
-            tw.line("%s contains unreadable content, " "will be ignored" % key)
+            tw.line("%s contains unreadable content, will be ignored" % key)
         else:
             tw.line("%s contains:" % key)
             for line in pformat(val).splitlines():

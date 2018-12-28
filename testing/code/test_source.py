@@ -1,12 +1,17 @@
+# -*- coding: utf-8 -*-
 # flake8: noqa
 # disable flake check on this file because some constructs are strange
 # or redundant on purpose and can't be disable on a line-by-line basis
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import inspect
 import sys
 
+import six
+
 import _pytest._code
-import py
 import pytest
 from _pytest._code import Source
 from _pytest._code.source import ast
@@ -26,30 +31,17 @@ def test_source_str_function():
     x = Source(
         """
         3
-    """,
-        rstrip=False,
-    )
-    assert str(x) == "\n3\n    "
-
-    x = Source(
         """
-        3
-    """,
-        rstrip=True,
     )
     assert str(x) == "\n3"
 
 
 def test_unicode():
-    try:
-        unicode
-    except NameError:
-        return
-    x = Source(unicode("4"))
+    x = Source(u"4")
     assert str(x) == "4"
-    co = _pytest._code.compile(unicode('u"\xc3\xa5"', "utf8"), mode="eval")
+    co = _pytest._code.compile(u'u"å"', mode="eval")
     val = eval(co)
-    assert isinstance(val, unicode)
+    assert isinstance(val, six.text_type)
 
 
 def test_source_from_function():
@@ -132,7 +124,7 @@ def test_source_strip_multiline():
 def test_syntaxerror_rerepresentation():
     ex = pytest.raises(SyntaxError, _pytest._code.compile, "xyz xyz")
     assert ex.value.lineno == 1
-    assert ex.value.offset in (4, 7)  # XXX pypy/jython versus cpython?
+    assert ex.value.offset in (4, 5, 7)  # XXX pypy/jython versus cpython?
     assert ex.value.text.strip(), "x x"
 
 
@@ -323,7 +315,7 @@ class TestSourceParsingAndCompiling(object):
 
     def test_compile_and_getsource(self):
         co = self.source.compile()
-        py.builtin.exec_(co, globals())
+        six.exec_(co, globals())
         f(7)
         excinfo = pytest.raises(AssertionError, "f(6)")
         frame = excinfo.traceback[-1].frame
@@ -392,7 +384,7 @@ def test_getfuncsource_dynamic():
         def g(): pass
     """
     co = _pytest._code.compile(source)
-    py.builtin.exec_(co, globals())
+    six.exec_(co, globals())
     assert str(_pytest._code.Source(f)).strip() == "def f():\n    raise ValueError"
     assert str(_pytest._code.Source(g)).strip() == "def g(): pass"
 
@@ -403,10 +395,13 @@ def test_getfuncsource_with_multine_string():
     pass
 """
 
-    assert (
-        str(_pytest._code.Source(f)).strip()
-        == 'def f():\n    c = """while True:\n    pass\n"""'
-    )
+    expected = '''\
+    def f():
+        c = """while True:
+    pass
+"""
+'''
+    assert str(_pytest._code.Source(f)) == expected.rstrip()
 
 
 def test_deindent():
@@ -414,21 +409,13 @@ def test_deindent():
 
     assert deindent(["\tfoo", "\tbar"]) == ["foo", "bar"]
 
-    def f():
-        c = """while True:
-    pass
-"""
-
-    lines = deindent(inspect.getsource(f).splitlines())
-    assert lines == ["def f():", '    c = """while True:', "    pass", '"""']
-
-    source = """
+    source = """\
         def f():
             def g():
                 pass
     """
     lines = deindent(source.splitlines())
-    assert lines == ["", "def f():", "    def g():", "        pass", "    "]
+    assert lines == ["def f():", "    def g():", "        pass"]
 
 
 def test_source_of_class_at_eof_without_newline(tmpdir):
@@ -632,7 +619,7 @@ def test_issue55():
     assert str(s) == '  round_trip("""\n""")'
 
 
-def XXXtest_multiline():
+def test_multiline():
     source = getstatement(
         0,
         """\
