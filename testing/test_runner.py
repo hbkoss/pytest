@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import inspect
 import os
 import sys
@@ -16,9 +11,10 @@ from _pytest import main
 from _pytest import outcomes
 from _pytest import reports
 from _pytest import runner
+from _pytest.outcomes import OutcomeException
 
 
-class TestSetupState(object):
+class TestSetupState:
     def test_setup(self, testdir):
         ss = runner.SetupState()
         item = testdir.getitem("def test_func(): pass")
@@ -106,7 +102,7 @@ class TestSetupState(object):
         assert module_teardown
 
 
-class BaseFunctionalTests(object):
+class BaseFunctionalTests:
     def test_passfunction(self, testdir):
         reports = testdir.runitem(
             """
@@ -441,7 +437,7 @@ class TestExecutionForked(BaseFunctionalTests):
         assert rep.when == "???"
 
 
-class TestSessionReports(object):
+class TestSessionReports:
     def test_collect_result(self, testdir):
         col = testdir.getmodulecol(
             """
@@ -465,12 +461,7 @@ class TestSessionReports(object):
         assert res[1].name == "TestClass"
 
 
-reporttypes = [
-    reports.BaseReport,
-    reports.TestReport,
-    reports.TeardownErrorReport,
-    reports.CollectReport,
-]
+reporttypes = [reports.BaseReport, reports.TestReport, reports.CollectReport]
 
 
 @pytest.mark.parametrize(
@@ -487,28 +478,18 @@ def test_report_extra_parameters(reporttype):
 
 
 def test_callinfo():
-    ci = runner.CallInfo(lambda: 0, "123")
+    ci = runner.CallInfo.from_call(lambda: 0, "123")
     assert ci.when == "123"
     assert ci.result == 0
     assert "result" in repr(ci)
     assert repr(ci) == "<CallInfo when='123' result: 0>"
 
-    ci = runner.CallInfo(lambda: 0 / 0, "123")
+    ci = runner.CallInfo.from_call(lambda: 0 / 0, "123")
     assert ci.when == "123"
     assert not hasattr(ci, "result")
     assert repr(ci) == "<CallInfo when='123' exception: division by zero>"
     assert ci.excinfo
     assert "exc" in repr(ci)
-
-
-def test_callinfo_repr_while_running():
-    def repr_while_running():
-        f = sys._getframe().f_back
-        assert "func" in f.f_locals
-        assert repr(f.f_locals["self"]) == "<CallInfo when='when' result: '<NOTSET>'>"
-
-    ci = runner.CallInfo(repr_while_running, "when")
-    assert repr(ci) == "<CallInfo when='when' result: None>"
 
 
 # design question: do we want general hooks in python files?
@@ -561,20 +542,16 @@ def test_outcomeexception_passes_except_Exception():
 
 
 def test_pytest_exit():
-    try:
+    with pytest.raises(pytest.exit.Exception) as excinfo:
         pytest.exit("hello")
-    except pytest.exit.Exception:
-        excinfo = _pytest._code.ExceptionInfo()
-        assert excinfo.errisinstance(KeyboardInterrupt)
+    assert excinfo.errisinstance(pytest.exit.Exception)
 
 
 def test_pytest_fail():
-    try:
+    with pytest.raises(pytest.fail.Exception) as excinfo:
         pytest.fail("hello")
-    except pytest.fail.Exception:
-        excinfo = _pytest._code.ExceptionInfo()
-        s = excinfo.exconly(tryshort=True)
-        assert s.startswith("Failed")
+    s = excinfo.exconly(tryshort=True)
+    assert s.startswith("Failed")
 
 
 def test_pytest_exit_msg(testdir):
@@ -590,16 +567,46 @@ def test_pytest_exit_msg(testdir):
     result.stderr.fnmatch_lines(["Exit: oh noes"])
 
 
+def _strip_resource_warnings(lines):
+    # Assert no output on stderr, except for unreliable ResourceWarnings.
+    # (https://github.com/pytest-dev/pytest/issues/5088)
+    return [
+        x
+        for x in lines
+        if not x.startswith(("Exception ignored in:", "ResourceWarning"))
+    ]
+
+
 def test_pytest_exit_returncode(testdir):
     testdir.makepyfile(
-        """
+        """\
         import pytest
         def test_foo():
             pytest.exit("some exit msg", 99)
     """
     )
     result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["*! *Exit: some exit msg !*"])
+
+    assert _strip_resource_warnings(result.stderr.lines) == [""]
     assert result.ret == 99
+
+    # It prints to stderr also in case of exit during pytest_sessionstart.
+    testdir.makeconftest(
+        """\
+        import pytest
+
+        def pytest_sessionstart():
+            pytest.exit("during_sessionstart", 98)
+        """
+    )
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["*! *Exit: during_sessionstart !*"])
+    assert _strip_resource_warnings(result.stderr.lines) == [
+        "Exit: during_sessionstart",
+        "",
+    ]
+    assert result.ret == 98
 
 
 def test_pytest_fail_notrace_runtest(testdir):
@@ -633,34 +640,28 @@ def test_pytest_fail_notrace_collection(testdir):
     assert "def some_internal_function()" not in result.stdout.str()
 
 
-@pytest.mark.parametrize("str_prefix", ["u", ""])
-def test_pytest_fail_notrace_non_ascii(testdir, str_prefix):
+def test_pytest_fail_notrace_non_ascii(testdir):
     """Fix pytest.fail with pytrace=False with non-ascii characters (#1178).
 
     This tests with native and unicode strings containing non-ascii chars.
     """
     testdir.makepyfile(
-        u"""
-        # coding: utf-8
+        """\
         import pytest
 
         def test_hello():
-            pytest.fail(%s'oh oh: ☺', pytrace=False)
-    """
-        % str_prefix
+            pytest.fail('oh oh: ☺', pytrace=False)
+        """
     )
     result = testdir.runpytest()
-    if sys.version_info[0] >= 3:
-        result.stdout.fnmatch_lines(["*test_hello*", "oh oh: ☺"])
-    else:
-        result.stdout.fnmatch_lines(["*test_hello*", "oh oh: *"])
+    result.stdout.fnmatch_lines(["*test_hello*", "oh oh: ☺"])
     assert "def test_hello" not in result.stdout.str()
 
 
 def test_pytest_no_tests_collected_exit_status(testdir):
     result = testdir.runpytest()
-    result.stdout.fnmatch_lines("*collected 0 items*")
-    assert result.ret == main.EXIT_NOTESTSCOLLECTED
+    result.stdout.fnmatch_lines(["*collected 0 items*"])
+    assert result.ret == main.ExitCode.NO_TESTS_COLLECTED
 
     testdir.makepyfile(
         test_foo="""
@@ -669,21 +670,21 @@ def test_pytest_no_tests_collected_exit_status(testdir):
     """
     )
     result = testdir.runpytest()
-    result.stdout.fnmatch_lines("*collected 1 item*")
-    result.stdout.fnmatch_lines("*1 passed*")
-    assert result.ret == main.EXIT_OK
+    result.stdout.fnmatch_lines(["*collected 1 item*"])
+    result.stdout.fnmatch_lines(["*1 passed*"])
+    assert result.ret == main.ExitCode.OK
 
     result = testdir.runpytest("-k nonmatch")
-    result.stdout.fnmatch_lines("*collected 1 item*")
-    result.stdout.fnmatch_lines("*1 deselected*")
-    assert result.ret == main.EXIT_NOTESTSCOLLECTED
+    result.stdout.fnmatch_lines(["*collected 1 item*"])
+    result.stdout.fnmatch_lines(["*1 deselected*"])
+    assert result.ret == main.ExitCode.NO_TESTS_COLLECTED
 
 
 def test_exception_printing_skip():
     try:
         pytest.skip("hello")
     except pytest.skip.Exception:
-        excinfo = _pytest._code.ExceptionInfo()
+        excinfo = _pytest._code.ExceptionInfo.from_current()
         s = excinfo.exconly(tryshort=True)
         assert s.startswith("Skipped")
 
@@ -704,21 +705,17 @@ def test_importorskip(monkeypatch):
         # check that importorskip reports the actual call
         # in this test the test_runner.py file
         assert path.purebasename == "test_runner"
-        pytest.raises(SyntaxError, "pytest.importorskip('x y z')")
-        pytest.raises(SyntaxError, "pytest.importorskip('x=y')")
+        pytest.raises(SyntaxError, pytest.importorskip, "x y z")
+        pytest.raises(SyntaxError, pytest.importorskip, "x=y")
         mod = types.ModuleType("hello123")
         mod.__version__ = "1.3"
         monkeypatch.setitem(sys.modules, "hello123", mod)
-        pytest.raises(
-            pytest.skip.Exception,
-            """
+        with pytest.raises(pytest.skip.Exception):
             pytest.importorskip("hello123", minversion="1.3.1")
-        """,
-        )
         mod2 = pytest.importorskip("hello123", minversion="1.3")
         assert mod2 == mod
     except pytest.skip.Exception:
-        print(_pytest._code.ExceptionInfo())
+        print(_pytest._code.ExceptionInfo.from_current())
         pytest.fail("spurious skip")
 
 
@@ -734,13 +731,10 @@ def test_importorskip_dev_module(monkeypatch):
         monkeypatch.setitem(sys.modules, "mockmodule", mod)
         mod2 = pytest.importorskip("mockmodule", minversion="0.12.0")
         assert mod2 == mod
-        pytest.raises(
-            pytest.skip.Exception,
-            """
-            pytest.importorskip('mockmodule1', minversion='0.14.0')""",
-        )
+        with pytest.raises(pytest.skip.Exception):
+            pytest.importorskip("mockmodule1", minversion="0.14.0")
     except pytest.skip.Exception:
-        print(_pytest._code.ExceptionInfo())
+        print(_pytest._code.ExceptionInfo.from_current())
         pytest.fail("spurious skip")
 
 
@@ -756,6 +750,22 @@ def test_importorskip_module_level(testdir):
     """
     )
     result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["*collected 0 items / 1 skipped*"])
+
+
+def test_importorskip_custom_reason(testdir):
+    """make sure custom reasons are used"""
+    testdir.makepyfile(
+        """
+        import pytest
+        foobarbaz = pytest.importorskip("foobarbaz2", reason="just because")
+
+        def test_foo():
+            pass
+    """
+    )
+    result = testdir.runpytest("-ra")
+    result.stdout.fnmatch_lines(["*just because*"])
     result.stdout.fnmatch_lines(["*collected 0 items / 1 skipped*"])
 
 
@@ -779,16 +789,15 @@ def test_pytest_cmdline_main(testdir):
 
 def test_unicode_in_longrepr(testdir):
     testdir.makeconftest(
-        """
-        # -*- coding: utf-8 -*-
+        """\
         import pytest
         @pytest.hookimpl(hookwrapper=True)
         def pytest_runtest_makereport():
             outcome = yield
             rep = outcome.get_result()
             if rep.when == "call":
-                rep.longrepr = u'ä'
-    """
+                rep.longrepr = 'ä'
+        """
     )
     testdir.makepyfile(
         """
@@ -863,7 +872,7 @@ def test_store_except_info_on_error():
     sys.last_traceback and friends.
     """
     # Simulate item that might raise a specific exception, depending on `raise_error` class var
-    class ItemMightRaise(object):
+    class ItemMightRaise:
         nodeid = "item_that_raises"
         raise_error = True
 
@@ -920,7 +929,7 @@ def test_current_test_env_var(testdir, monkeypatch):
     assert "PYTEST_CURRENT_TEST" not in os.environ
 
 
-class TestReportContents(object):
+class TestReportContents:
     """
     Test user-level API of ``TestReport`` objects.
     """
@@ -989,3 +998,18 @@ class TestReportContents(object):
         rep = reports[1]
         assert rep.capstdout == ""
         assert rep.capstderr == ""
+
+
+def test_outcome_exception_bad_msg():
+    """Check that OutcomeExceptions validate their input to prevent confusing errors (#5578)"""
+
+    def func():
+        pass
+
+    expected = (
+        "OutcomeException expected string as 'msg' parameter, got 'function' instead.\n"
+        "Perhaps you meant to use a mark?"
+    )
+    with pytest.raises(TypeError) as excinfo:
+        OutcomeException(func)
+    assert str(excinfo.value) == expected

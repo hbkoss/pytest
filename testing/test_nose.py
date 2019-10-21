@@ -1,9 +1,4 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import pytest
-from _pytest.warnings import SHOW_PYTEST_WARNINGS_ARG
 
 
 def setup_module(mod):
@@ -36,7 +31,7 @@ def test_setup_func_with_setup_decorator():
 
     values = []
 
-    class A(object):
+    class A:
         @pytest.fixture(autouse=True)
         def f(self):
             values.append(1)
@@ -48,7 +43,7 @@ def test_setup_func_with_setup_decorator():
 def test_setup_func_not_callable():
     from _pytest.nose import call_optional
 
-    class A(object):
+    class A:
         f = 1
 
     call_optional(A(), "f")
@@ -162,73 +157,6 @@ def test_nose_setup_partial(testdir):
     result.stdout.fnmatch_lines(["*2 passed*"])
 
 
-def test_nose_test_generator_fixtures(testdir):
-    p = testdir.makepyfile(
-        """
-        # taken from nose-0.11.1 unit_tests/test_generator_fixtures.py
-        from nose.tools import eq_
-        called = []
-
-        def outer_setup():
-            called.append('outer_setup')
-
-        def outer_teardown():
-            called.append('outer_teardown')
-
-        def inner_setup():
-            called.append('inner_setup')
-
-        def inner_teardown():
-            called.append('inner_teardown')
-
-        def test_gen():
-            called[:] = []
-            for i in range(0, 5):
-                yield check, i
-
-        def check(i):
-            expect = ['outer_setup']
-            for x in range(0, i):
-                expect.append('inner_setup')
-                expect.append('inner_teardown')
-            expect.append('inner_setup')
-            eq_(called, expect)
-
-
-        test_gen.setup = outer_setup
-        test_gen.teardown = outer_teardown
-        check.setup = inner_setup
-        check.teardown = inner_teardown
-
-        class TestClass(object):
-            def setup(self):
-                print("setup called in %s" % self)
-                self.called = ['setup']
-
-            def teardown(self):
-                print("teardown called in %s" % self)
-                eq_(self.called, ['setup'])
-                self.called.append('teardown')
-
-            def test(self):
-                print("test called in %s" % self)
-                for i in range(0, 5):
-                    yield self.check, i
-
-            def check(self, i):
-                print("check called in %s" % self)
-                expect = ['setup']
-                #for x in range(0, i):
-                #    expect.append('setup')
-                #    expect.append('teardown')
-                #expect.append('setup')
-                eq_(self.called, expect)
-    """
-    )
-    result = testdir.runpytest(p, "-p", "nose", SHOW_PYTEST_WARNINGS_ARG)
-    result.stdout.fnmatch_lines(["*10 passed*"])
-
-
 def test_module_level_setup(testdir):
     testdir.makepyfile(
         """
@@ -325,7 +253,7 @@ def test_apiwrapper_problem_issue260(testdir):
 
 
 def test_setup_teardown_linking_issue265(testdir):
-    # we accidentally didnt integrate nose setupstate with normal setupstate
+    # we accidentally didn't integrate nose setupstate with normal setupstate
     # this test ensures that won't happen again
     testdir.makepyfile(
         '''
@@ -434,3 +362,16 @@ def test_nottest_class_decorator(testdir):
     assert not reprec.getfailedcollections()
     calls = reprec.getreports("pytest_runtest_logreport")
     assert not calls
+
+
+def test_skip_test_with_unicode(testdir):
+    testdir.makepyfile(
+        """\
+        import unittest
+        class TestClass():
+            def test_io(self):
+                raise unittest.SkipTest('😊')
+        """
+    )
+    result = testdir.runpytest()
+    result.stdout.fnmatch_lines(["* 1 skipped *"])

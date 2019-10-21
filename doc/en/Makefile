@@ -13,7 +13,10 @@ PAPEROPT_letter = -D latex_paper_size=letter
 ALLSPHINXOPTS   = -d $(BUILDDIR)/doctrees $(PAPEROPT_$(PAPER)) $(SPHINXOPTS) .
 
 REGENDOC_ARGS := \
-	--normalize "/in \d+.\d+ seconds/in 0.12 seconds/" \
+	--normalize "/[ \t]+\n/\n/" \
+	--normalize "~\$$REGENDOC_TMPDIR~/home/sweet/project~" \
+	--normalize "~/path/to/example~/home/sweet/project~" \
+	--normalize "/in \d.\d\ds/in 0.12s/" \
 	--normalize "@/tmp/pytest-of-.*/pytest-\d+@PYTEST_TMPDIR@" \
 	--normalize "@pytest-(\d+)\\.[^ ,]+@pytest-\1.x.y@" \
 	--normalize "@(This is pytest version )(\d+)\\.[^ ,]+@\1\2.x.y@" \
@@ -38,8 +41,9 @@ help:
 clean:
 	-rm -rf $(BUILDDIR)/*
 
+regen: REGENDOC_FILES:=*.rst */*.rst
 regen:
-	PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPT=-pno:hypothesis COLUMNS=76 regendoc --update *.rst */*.rst ${REGENDOC_ARGS}
+	PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-pno:hypothesis -Wignore::pytest.PytestUnknownMarkWarning" COLUMNS=76 regendoc --update ${REGENDOC_FILES} ${REGENDOC_ARGS}
 
 html:
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html

@@ -1,13 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import re
 import sys
 import textwrap
-
-import six
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -23,11 +17,11 @@ def mp():
 
 
 def test_setattr():
-    class A(object):
+    class A:
         x = 1
 
     monkeypatch = MonkeyPatch()
-    pytest.raises(AttributeError, "monkeypatch.setattr(A, 'notexists', 2)")
+    pytest.raises(AttributeError, monkeypatch.setattr, A, "notexists", 2)
     monkeypatch.setattr(A, "y", 2, raising=False)
     assert A.y == 2
     monkeypatch.undo()
@@ -46,7 +40,7 @@ def test_setattr():
     assert A.x == 5
 
 
-class TestSetattrWithImportPath(object):
+class TestSetattrWithImportPath:
     def test_string_expression(self, monkeypatch):
         monkeypatch.setattr("os.path.abspath", lambda x: "hello2")
         assert os.path.abspath("123") == "hello2"
@@ -88,7 +82,7 @@ class TestSetattrWithImportPath(object):
 
 
 def test_delattr():
-    class A(object):
+    class A:
         x = 1
 
     monkeypatch = MonkeyPatch()
@@ -99,7 +93,7 @@ def test_delattr():
 
     monkeypatch = MonkeyPatch()
     monkeypatch.delattr(A, "x")
-    pytest.raises(AttributeError, "monkeypatch.delattr(A, 'y')")
+    pytest.raises(AttributeError, monkeypatch.delattr, A, "y")
     monkeypatch.delattr(A, "y", raising=False)
     monkeypatch.setattr(A, "x", 5, raising=False)
     assert A.x == 5
@@ -156,7 +150,7 @@ def test_delitem():
     monkeypatch.delitem(d, "x")
     assert "x" not in d
     monkeypatch.delitem(d, "y", raising=False)
-    pytest.raises(KeyError, "monkeypatch.delitem(d, 'y')")
+    pytest.raises(KeyError, monkeypatch.delitem, d, "y")
     assert not d
     monkeypatch.setitem(d, "y", 1700)
     assert d["y"] == 1700
@@ -182,7 +176,7 @@ def test_delenv():
     name = "xyz1234"
     assert name not in os.environ
     monkeypatch = MonkeyPatch()
-    pytest.raises(KeyError, "monkeypatch.delenv(%r, raising=True)" % name)
+    pytest.raises(KeyError, monkeypatch.delenv, name, raising=True)
     monkeypatch.delenv(name, raising=False)
     monkeypatch.undo()
     os.environ[name] = "1"
@@ -199,30 +193,14 @@ def test_delenv():
             del os.environ[name]
 
 
-class TestEnvironWarnings(object):
+class TestEnvironWarnings:
     """
     os.environ keys and values should be native strings, otherwise it will cause problems with other modules (notably
     subprocess). On Python 2 os.environ accepts anything without complaining, while Python 3 does the right thing
     and raises an error.
     """
 
-    VAR_NAME = u"PYTEST_INTERNAL_MY_VAR"
-
-    @pytest.mark.skipif(six.PY3, reason="Python 2 only test")
-    def test_setenv_unicode_key(self, monkeypatch):
-        with pytest.warns(
-            pytest.PytestWarning,
-            match="Environment variable name {!r} should be str".format(self.VAR_NAME),
-        ):
-            monkeypatch.setenv(self.VAR_NAME, "2")
-
-    @pytest.mark.skipif(six.PY3, reason="Python 2 only test")
-    def test_delenv_unicode_key(self, monkeypatch):
-        with pytest.warns(
-            pytest.PytestWarning,
-            match="Environment variable name {!r} should be str".format(self.VAR_NAME),
-        ):
-            monkeypatch.delenv(self.VAR_NAME, raising=False)
+    VAR_NAME = "PYTEST_INTERNAL_MY_VAR"
 
     def test_setenv_non_str_warning(self, monkeypatch):
         value = 2
@@ -348,14 +326,12 @@ def test_importerror(testdir):
     result = testdir.runpytest()
     result.stdout.fnmatch_lines(
         """
-        *import error in package.a: No module named {0}doesnotexist{0}*
-    """.format(
-            "'" if sys.version_info > (3, 0) else ""
-        )
+        *import error in package.a: No module named 'doesnotexist'*
+    """
     )
 
 
-class SampleNew(object):
+class SampleNew:
     @staticmethod
     def hello():
         return True
@@ -365,7 +341,7 @@ class SampleNewInherit(SampleNew):
     pass
 
 
-class SampleOld(object):
+class SampleOld:
     # oldstyle on python2
     @staticmethod
     def hello():
@@ -391,6 +367,33 @@ def test_issue156_undo_staticmethod(Sample):
     assert Sample.hello()
 
 
+def test_undo_class_descriptors_delattr():
+    class SampleParent:
+        @classmethod
+        def hello(_cls):
+            pass
+
+        @staticmethod
+        def world():
+            pass
+
+    class SampleChild(SampleParent):
+        pass
+
+    monkeypatch = MonkeyPatch()
+
+    original_hello = SampleChild.hello
+    original_world = SampleChild.world
+    monkeypatch.delattr(SampleParent, "hello")
+    monkeypatch.delattr(SampleParent, "world")
+    assert getattr(SampleParent, "hello", None) is None
+    assert getattr(SampleParent, "world", None) is None
+
+    monkeypatch.undo()
+    assert original_hello == SampleChild.hello
+    assert original_world == SampleChild.world
+
+
 def test_issue1338_name_resolving():
     pytest.importorskip("requests")
     monkeypatch = MonkeyPatch()
@@ -410,3 +413,35 @@ def test_context():
         m.setattr(functools, "partial", 3)
         assert not inspect.isclass(functools.partial)
     assert inspect.isclass(functools.partial)
+
+
+def test_syspath_prepend_with_namespace_packages(testdir, monkeypatch):
+    for dirname in "hello", "world":
+        d = testdir.mkdir(dirname)
+        ns = d.mkdir("ns_pkg")
+        ns.join("__init__.py").write(
+            "__import__('pkg_resources').declare_namespace(__name__)"
+        )
+        lib = ns.mkdir(dirname)
+        lib.join("__init__.py").write("def check(): return %r" % dirname)
+
+    monkeypatch.syspath_prepend("hello")
+    import ns_pkg.hello
+
+    assert ns_pkg.hello.check() == "hello"
+
+    with pytest.raises(ImportError):
+        import ns_pkg.world
+
+    # Prepending should call fixup_namespace_packages.
+    monkeypatch.syspath_prepend("world")
+    import ns_pkg.world
+
+    assert ns_pkg.world.check() == "world"
+
+    # Should invalidate caches via importlib.invalidate_caches.
+    tmpdir = testdir.tmpdir
+    modules_tmpdir = tmpdir.mkdir("modules_tmpdir")
+    monkeypatch.syspath_prepend(str(modules_tmpdir))
+    modules_tmpdir.join("main_app.py").write("app = True")
+    from main_app import app  # noqa: F401

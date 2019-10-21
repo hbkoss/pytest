@@ -41,6 +41,7 @@ Full pytest documentation
 
    backwards-compatibility
    deprecations
+   py27-py34-deprecation
    historical-notes
    license
    contributing
@@ -49,6 +50,7 @@ Full pytest documentation
    projects
    faq
    contact
+   sponsor
 
 .. only:: html
 

@@ -1,7 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import re
 import warnings
 
@@ -29,7 +25,7 @@ def test_recwarn_functional(testdir):
     reprec.assertoutcome(passed=1)
 
 
-class TestWarningsRecorderChecker(object):
+class TestWarningsRecorderChecker:
     def test_recording(self):
         rec = WarningsRecorder()
         with rec:
@@ -44,10 +40,10 @@ class TestWarningsRecorderChecker(object):
             rec.clear()
             assert len(rec.list) == 0
             assert values is rec.list
-            pytest.raises(AssertionError, "rec.pop()")
+            pytest.raises(AssertionError, rec.pop)
 
-    @pytest.mark.issue(4243)
     def test_warn_stacklevel(self):
+        """#4243"""
         rec = WarningsRecorder()
         with rec:
             warnings.warn("test", DeprecationWarning, 2)
@@ -76,7 +72,7 @@ class TestWarningsRecorderChecker(object):
                         pass  # can't enter twice
 
 
-class TestDeprecatedCall(object):
+class TestDeprecatedCall:
     """test pytest.deprecated_call()"""
 
     def dep(self, i, j=None):
@@ -208,15 +204,18 @@ class TestDeprecatedCall(object):
                 warnings.warn("this is not here", DeprecationWarning)
 
 
-class TestWarns(object):
-    def test_strings(self):
+class TestWarns:
+    def test_check_callable(self):
+        source = "warnings.warn('w1', RuntimeWarning)"
+        with pytest.raises(TypeError, match=r".* must be callable"):
+            pytest.warns(RuntimeWarning, source)
+
+    def test_several_messages(self):
         # different messages, b/c Python suppresses multiple identical warnings
-        source1 = "warnings.warn('w1', RuntimeWarning)"
-        source2 = "warnings.warn('w2', RuntimeWarning)"
-        source3 = "warnings.warn('w3', RuntimeWarning)"
-        pytest.warns(RuntimeWarning, source1)
-        pytest.raises(pytest.fail.Exception, lambda: pytest.warns(UserWarning, source2))
-        pytest.warns(RuntimeWarning, source3)
+        pytest.warns(RuntimeWarning, lambda: warnings.warn("w1", RuntimeWarning))
+        with pytest.raises(pytest.fail.Exception):
+            pytest.warns(UserWarning, lambda: warnings.warn("w2", RuntimeWarning))
+        pytest.warns(RuntimeWarning, lambda: warnings.warn("w3", RuntimeWarning))
 
     def test_function(self):
         pytest.warns(
@@ -375,3 +374,9 @@ class TestWarns(object):
         assert f() == 10
         assert pytest.warns(UserWarning, f) == 10
         assert pytest.warns(UserWarning, f) == 10
+
+    def test_warns_context_manager_with_kwargs(self):
+        with pytest.raises(TypeError) as excinfo:
+            with pytest.warns(UserWarning, foo="bar"):
+                pass
+        assert "Unexpected keyword arguments" in str(excinfo.value)

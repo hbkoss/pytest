@@ -1,8 +1,14 @@
 import os
+from typing import List
+from typing import Optional
 
 import py
 
 from .exceptions import UsageError
+from _pytest.outcomes import fail
+
+if False:
+    from . import Config  # noqa: F401
 
 
 def exists(path, ignore=EnvironmentError):
@@ -19,8 +25,6 @@ def getcfg(args, config=None):
 
     note: config is optional and used only to issue warnings explicitly (#2891).
     """
-    from _pytest.deprecated import CFG_PYTEST_SECTION
-
     inibasenames = ["pytest.ini", "tox.ini", "setup.cfg"]
     args = [x for x in args if not str(x).startswith("-")]
     if not args:
@@ -31,25 +35,24 @@ def getcfg(args, config=None):
             for inibasename in inibasenames:
                 p = base.join(inibasename)
                 if exists(p):
-                    iniconfig = py.iniconfig.IniConfig(p)
-                    if "pytest" in iniconfig.sections:
-                        if inibasename == "setup.cfg" and config is not None:
-                            from _pytest.warnings import _issue_config_warning
-                            from _pytest.warning_types import RemovedInPytest4Warning
+                    try:
+                        iniconfig = py.iniconfig.IniConfig(p)
+                    except py.iniconfig.ParseError as exc:
+                        raise UsageError(str(exc))
 
-                            _issue_config_warning(
-                                RemovedInPytest4Warning(
-                                    CFG_PYTEST_SECTION.format(filename=inibasename)
-                                ),
-                                config=config,
-                                stacklevel=2,
-                            )
-                        return base, p, iniconfig["pytest"]
                     if (
                         inibasename == "setup.cfg"
                         and "tool:pytest" in iniconfig.sections
                     ):
                         return base, p, iniconfig["tool:pytest"]
+                    elif "pytest" in iniconfig.sections:
+                        if inibasename == "setup.cfg" and config is not None:
+
+                            fail(
+                                CFG_PYTEST_SECTION.format(filename=inibasename),
+                                pytrace=False,
+                            )
+                        return base, p, iniconfig["pytest"]
                     elif inibasename == "pytest.ini":
                         # allowed to be empty
                         return base, p, {}
@@ -101,7 +104,15 @@ def get_dirs_from_args(args):
     return [get_dir_from_path(path) for path in possible_paths if path.exists()]
 
 
-def determine_setup(inifile, args, rootdir_cmd_arg=None, config=None):
+CFG_PYTEST_SECTION = "[pytest] section in {filename} files is no longer supported, change to [tool:pytest] instead."
+
+
+def determine_setup(
+    inifile: str,
+    args: List[str],
+    rootdir_cmd_arg: Optional[str] = None,
+    config: Optional["Config"] = None,
+):
     dirs = get_dirs_from_args(args)
     if inifile:
         iniconfig = py.iniconfig.IniConfig(inifile)
@@ -111,41 +122,40 @@ def determine_setup(inifile, args, rootdir_cmd_arg=None, config=None):
             try:
                 inicfg = iniconfig[section]
                 if is_cfg_file and section == "pytest" and config is not None:
-                    from _pytest.deprecated import CFG_PYTEST_SECTION
-                    from _pytest.warnings import _issue_config_warning
-
-                    # TODO: [pytest] section in *.cfg files is deprecated. Need refactoring once
-                    # the deprecation expires.
-                    _issue_config_warning(
-                        CFG_PYTEST_SECTION.format(filename=str(inifile)),
-                        config,
-                        stacklevel=2,
+                    fail(
+                        CFG_PYTEST_SECTION.format(filename=str(inifile)), pytrace=False
                     )
                 break
             except KeyError:
                 inicfg = None
-        rootdir = get_common_ancestor(dirs)
+        if rootdir_cmd_arg is None:
+            rootdir = get_common_ancestor(dirs)
     else:
         ancestor = get_common_ancestor(dirs)
         rootdir, inifile, inicfg = getcfg([ancestor], config=config)
-        if rootdir is None:
-            for rootdir in ancestor.parts(reverse=True):
-                if rootdir.join("setup.py").exists():
+        if rootdir is None and rootdir_cmd_arg is None:
+            for possible_rootdir in ancestor.parts(reverse=True):
+                if possible_rootdir.join("setup.py").exists():
+                    rootdir = possible_rootdir
                     break
             else:
-                rootdir, inifile, inicfg = getcfg(dirs, config=config)
+                if dirs != [ancestor]:
+                    rootdir, inifile, inicfg = getcfg(dirs, config=config)
                 if rootdir is None:
-                    rootdir = get_common_ancestor([py.path.local(), ancestor])
+                    if config is not None:
+                        cwd = config.invocation_dir
+                    else:
+                        cwd = py.path.local()
+                    rootdir = get_common_ancestor([cwd, ancestor])
                     is_fs_root = os.path.splitdrive(str(rootdir))[1] == "/"
                     if is_fs_root:
                         rootdir = ancestor
     if rootdir_cmd_arg:
-        rootdir_abs_path = py.path.local(os.path.expandvars(rootdir_cmd_arg))
-        if not os.path.isdir(str(rootdir_abs_path)):
+        rootdir = py.path.local(os.path.expandvars(rootdir_cmd_arg))
+        if not rootdir.isdir():
             raise UsageError(
                 "Directory '{}' not found. Check your '--rootdir' option.".format(
-                    rootdir_abs_path
+                    rootdir
                 )
             )
-        rootdir = rootdir_abs_path
     return rootdir, inifile, inicfg or {}

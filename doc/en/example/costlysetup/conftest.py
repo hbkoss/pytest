@@ -1,14 +1,14 @@
 import pytest
 
 
-@pytest.fixture("session")
+@pytest.fixture(scope="session")
 def setup(request):
     setup = CostlySetup()
     yield setup
     setup.finalize()
 
 
-class CostlySetup(object):
+class CostlySetup:
     def __init__(self):
         import time
 

@@ -1,34 +1,24 @@
 import sys
 
-import six
-
 import pytest
 from _pytest.outcomes import Failed
 
 
-class TestRaises(object):
+class TestRaises:
+    def test_check_callable(self):
+        with pytest.raises(TypeError, match=r".* must be callable"):
+            pytest.raises(RuntimeError, "int('qwe')")
+
     def test_raises(self):
-        source = "int('qwe')"
-        excinfo = pytest.raises(ValueError, source)
-        code = excinfo.traceback[-1].frame.code
-        s = str(code.fullsource)
-        assert s == source
-
-    def test_raises_exec(self):
-        pytest.raises(ValueError, "a,x = []")
-
-    def test_raises_exec_correct_filename(self):
-        excinfo = pytest.raises(ValueError, 'int("s")')
-        assert __file__ in excinfo.traceback[-1].path
-
-    def test_raises_syntax_error(self):
-        pytest.raises(SyntaxError, "qwe qwe qwe")
+        excinfo = pytest.raises(ValueError, int, "qwe")
+        assert "invalid literal" in str(excinfo.value)
 
     def test_raises_function(self):
-        pytest.raises(ValueError, int, "hello")
+        excinfo = pytest.raises(ValueError, int, "hello")
+        assert "invalid literal" in str(excinfo.value)
 
     def test_raises_callable_no_exception(self):
-        class A(object):
+        class A:
             def __call__(self):
                 pass
 
@@ -87,6 +77,54 @@ class TestRaises(object):
         result = testdir.runpytest()
         result.stdout.fnmatch_lines(["*3 passed*"])
 
+    def test_does_not_raise(self, testdir):
+        testdir.makepyfile(
+            """
+            from contextlib import contextmanager
+            import pytest
+
+            @contextmanager
+            def does_not_raise():
+                yield
+
+            @pytest.mark.parametrize('example_input,expectation', [
+                (3, does_not_raise()),
+                (2, does_not_raise()),
+                (1, does_not_raise()),
+                (0, pytest.raises(ZeroDivisionError)),
+            ])
+            def test_division(example_input, expectation):
+                '''Test how much I know division.'''
+                with expectation:
+                    assert (6 / example_input) is not None
+        """
+        )
+        result = testdir.runpytest()
+        result.stdout.fnmatch_lines(["*4 passed*"])
+
+    def test_does_not_raise_does_raise(self, testdir):
+        testdir.makepyfile(
+            """
+            from contextlib import contextmanager
+            import pytest
+
+            @contextmanager
+            def does_not_raise():
+                yield
+
+            @pytest.mark.parametrize('example_input,expectation', [
+                (0, does_not_raise()),
+                (1, pytest.raises(ZeroDivisionError)),
+            ])
+            def test_division(example_input, expectation):
+                '''Test how much I know division.'''
+                with expectation:
+                    assert (6 / example_input) is not None
+        """
+        )
+        result = testdir.runpytest()
+        result.stdout.fnmatch_lines(["*2 failed*"])
+
     def test_noclass(self):
         with pytest.raises(TypeError):
             pytest.raises("wrong", lambda: None)
@@ -116,16 +154,6 @@ class TestRaises(object):
         else:
             assert False, "Expected pytest.raises.Exception"
 
-    def test_custom_raise_message(self):
-        message = "TEST_MESSAGE"
-        try:
-            with pytest.raises(ValueError, message=message):
-                pass
-        except pytest.raises.Exception as e:
-            assert e.msg == message
-        else:
-            assert False, "Expected pytest.raises.Exception"
-
     @pytest.mark.parametrize("method", ["function", "with"])
     def test_raises_cyclic_reference(self, method):
         """
@@ -133,11 +161,18 @@ class TestRaises(object):
         """
         import gc
 
-        class T(object):
+        class T:
             def __call__(self):
+                # Early versions of Python 3.5 have some bug causing the
+                # __call__ frame to still refer to t even after everything
+                # is done. This makes the test pass for them.
+                if sys.version_info < (3, 5, 2):  # pragma: no cover
+                    del self
                 raise ValueError
 
         t = T()
+        refcount = len(gc.get_referrers(t))
+
         if method == "function":
             pytest.raises(ValueError, t)
         else:
@@ -147,11 +182,7 @@ class TestRaises(object):
         # ensure both forms of pytest.raises don't leave exceptions in sys.exc_info()
         assert sys.exc_info() == (None, None, None)
 
-        del t
-
-        # ensure the t instance is not stuck in a cyclic reference
-        for o in gc.get_objects():
-            assert type(o) is not T
+        assert refcount == len(gc.get_referrers(t))
 
     def test_raises_match(self):
         msg = r"with base \d+"
@@ -163,12 +194,19 @@ class TestRaises(object):
             int("asdf")
 
         msg = "with base 16"
-        expr = r"Pattern '{}' not found in 'invalid literal for int\(\) with base 10: 'asdf''".format(
+        expr = r"Pattern '{}' not found in \"invalid literal for int\(\) with base 10: 'asdf'\"".format(
             msg
         )
         with pytest.raises(AssertionError, match=expr):
             with pytest.raises(ValueError, match=msg):
                 int("asdf", base=10)
+
+    def test_match_failure_string_quoting(self):
+        with pytest.raises(AssertionError) as excinfo:
+            with pytest.raises(AssertionError, match="'foo"):
+                raise AssertionError("'bar")
+        msg, = excinfo.value.args
+        assert msg == 'Pattern "\'foo" not found in "\'bar"'
 
     def test_raises_match_wrong_type(self):
         """Raising an exception with the wrong type and match= given.
@@ -181,17 +219,14 @@ class TestRaises(object):
                 int("asdf")
 
     def test_raises_exception_looks_iterable(self):
-        from six import add_metaclass
-
-        class Meta(type(object)):
+        class Meta(type):
             def __getitem__(self, item):
                 return 1 / 0
 
             def __len__(self):
                 return 1
 
-        @add_metaclass(Meta)
-        class ClassLooksIterableException(Exception):
+        class ClassLooksIterableException(Exception, metaclass=Meta):
             pass
 
         with pytest.raises(
@@ -204,20 +239,18 @@ class TestRaises(object):
         """Test current behavior with regard to exceptions via __class__ (#4284)."""
 
         class CrappyClass(Exception):
-            @property
+            # Type ignored because it's bypassed intentionally.
+            @property  # type: ignore
             def __class__(self):
                 assert False, "via __class__"
 
-        if six.PY2:
-            with pytest.raises(pytest.fail.Exception) as excinfo:
-                with pytest.raises(CrappyClass()):
-                    pass
-            assert "DID NOT RAISE" in excinfo.value.args[0]
+        with pytest.raises(AssertionError) as excinfo:
+            with pytest.raises(CrappyClass()):
+                pass
+        assert "via __class__" in excinfo.value.args[0]
 
-            with pytest.raises(CrappyClass) as excinfo:
-                raise CrappyClass()
-        else:
-            with pytest.raises(AssertionError) as excinfo:
-                with pytest.raises(CrappyClass()):
-                    pass
-            assert "via __class__" in excinfo.value.args[0]
+    def test_raises_context_manager_with_kwargs(self):
+        with pytest.raises(TypeError) as excinfo:
+            with pytest.raises(Exception, foo="bar"):
+                pass
+        assert "Unexpected keyword arguments" in str(excinfo.value)

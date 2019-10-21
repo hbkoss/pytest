@@ -1,7 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import ast
 import inspect
 import linecache
@@ -11,12 +7,12 @@ import tokenize
 import warnings
 from ast import PyCF_ONLY_AST as _AST_FLAG
 from bisect import bisect_right
+from typing import List
 
 import py
-import six
 
 
-class Source(object):
+class Source:
     """ an immutable object holding a source code fragment,
         possibly deindenting it.
     """
@@ -24,16 +20,16 @@ class Source(object):
     _compilecounter = 0
 
     def __init__(self, *parts, **kwargs):
-        self.lines = lines = []
+        self.lines = lines = []  # type: List[str]
         de = kwargs.get("deindent", True)
         for part in parts:
             if not part:
-                partlines = []
+                partlines = []  # type: List[str]
             elif isinstance(part, Source):
                 partlines = part.lines
             elif isinstance(part, (tuple, list)):
                 partlines = [x.rstrip("\n") for x in part]
-            elif isinstance(part, six.string_types):
+            elif isinstance(part, str):
                 partlines = part.split("\n")
             else:
                 partlines = getsource(part, deindent=de).lines
@@ -49,7 +45,8 @@ class Source(object):
                 return str(self) == other
             return False
 
-    __hash__ = None
+    # Ignore type because of https://github.com/python/mypy/issues/4266.
+    __hash__ = None  # type: ignore
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -161,8 +158,7 @@ class Source(object):
         source = "\n".join(self.lines) + "\n"
         try:
             co = compile(source, filename, mode, flag)
-        except SyntaxError:
-            ex = sys.exc_info()[1]
+        except SyntaxError as ex:
             # re-represent syntax errors from parsing python strings
             msglines = self.lines[: ex.lineno]
             if ex.offset:
@@ -177,7 +173,8 @@ class Source(object):
             if flag & _AST_FLAG:
                 return co
             lines = [(x + "\n") for x in self.lines]
-            linecache.cache[filename] = (1, None, lines, filename)
+            # Type ignored because linecache.cache is private.
+            linecache.cache[filename] = (1, None, lines, filename)  # type: ignore
             return co
 
 
@@ -203,7 +200,9 @@ def compile_(source, filename=None, mode="exec", flags=0, dont_inherit=0):
 
 def getfslineno(obj):
     """ Return source location (path, lineno) for the given object.
-    If the source cannot be determined return ("", -1)
+    If the source cannot be determined return ("", -1).
+
+    The line number is 0-based.
     """
     from .code import Code
 
@@ -237,9 +236,7 @@ def getfslineno(obj):
 def findsource(obj):
     try:
         sourcelines, lineno = inspect.findsource(obj)
-    except py.builtin._sysex:
-        raise
-    except:  # noqa
+    except Exception:
         return None, -1
     source = Source()
     source.lines = [line.rstrip() for line in sourcelines]
@@ -286,7 +283,7 @@ def get_statement_startend2(lineno, node):
     return start, end
 
 
-def getstatementrange_ast(lineno, source, assertion=False, astnode=None):
+def getstatementrange_ast(lineno, source: Source, assertion=False, astnode=None):
     if astnode is None:
         content = str(source)
         # See #4260:

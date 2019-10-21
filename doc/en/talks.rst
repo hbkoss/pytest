@@ -2,13 +2,6 @@
 Talks and Tutorials
 ==========================
 
-..
-   .. sidebar:: Next Open Trainings
-
-      `Professional Testing with Python
-      <http://www.python-academy.com/courses/specialtopics/python_course_testing.html>`_,
-      26-28 April 2017, Leipzig, Germany.
-
 .. _`funcargs`: funcargs.html
 
 Books
@@ -23,7 +16,12 @@ Books
 Talks and blog postings
 ---------------------------------------------
 
+- `pytest: recommendations, basic packages for testing in Python and Django, Andreu Vallbona, PyBCN June 2019 <https://www.slideshare.net/AndreuVallbonaPlazas/pybcn-pytest-recomendaciones-paquetes-bsicos-para-testing-en-python-y-django>`_.
+
 - pytest: recommendations, basic packages for testing in Python and Django, Andreu Vallbona, PyconES 2017 (`slides in english <http://talks.apsl.io/testing-pycones-2017/>`_, `video in spanish <https://www.youtube.com/watch?v=K20GeR-lXDk>`_)
+
+- `pytest advanced, Andrew Svetlov (Russian, PyCon Russia, 2016)
+  <https://www.youtube.com/watch?v=7KgihdKTWY4>`_.
 
 - `Pythonic testing, Igor Starikov (Russian, PyNsk, November 2016)
   <https://www.youtube.com/watch?v=_92nfdd5nK8>`_.

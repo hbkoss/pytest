@@ -1,13 +1,8 @@
 """
 support for presenting detailed information in failing assertions.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import sys
-
-import six
+from typing import Optional
 
 from _pytest.assertion import rewrite
 from _pytest.assertion import truncate
@@ -28,6 +23,13 @@ def pytest_addoption(parser):
                             (the default) rewrites assert statements in
                             test modules on import to provide assert
                             expression information.""",
+    )
+    parser.addini(
+        "enable_assertion_pass_hook",
+        type="bool",
+        default=False,
+        help="Enables the pytest_assertion_pass hook."
+        "Make sure to delete any previously generated pyc cache files.",
     )
 
 
@@ -51,32 +53,30 @@ def register_assert_rewrite(*names):
             importhook = hook
             break
     else:
-        importhook = DummyRewriteHook()
+        # TODO(typing): Add a protocol for mark_rewrite() and use it
+        # for importhook and for PytestPluginManager.rewrite_hook.
+        importhook = DummyRewriteHook()  # type: ignore
     importhook.mark_rewrite(*names)
 
 
-class DummyRewriteHook(object):
+class DummyRewriteHook:
     """A no-op import hook for when rewriting is disabled."""
 
     def mark_rewrite(self, *names):
         pass
 
 
-class AssertionState(object):
+class AssertionState:
     """State for the assertion plugin."""
 
     def __init__(self, config, mode):
         self.mode = mode
         self.trace = config.trace.root.get("assertion")
-        self.hook = None
+        self.hook = None  # type: Optional[rewrite.AssertionRewritingHook]
 
 
 def install_importhook(config):
     """Try to install the rewrite hook, raise SystemError if it fails."""
-    # Jython has an AST bug that make the assertion rewriting hook malfunction.
-    if sys.platform.startswith("java"):
-        raise SystemError("rewrite not supported")
-
     config._assertstate = AssertionState(config, "rewrite")
     config._assertstate.hook = hook = rewrite.AssertionRewritingHook(config)
     sys.meta_path.insert(0, hook)
@@ -102,7 +102,7 @@ def pytest_collection(session):
 
 
 def pytest_runtest_setup(item):
-    """Setup the pytest_assertrepr_compare hook
+    """Setup the pytest_assertrepr_compare and pytest_assertion_pass hooks
 
     The newinterpret and rewrite modules will use util._reprcompare if
     it exists to use custom reporting via the
@@ -111,6 +111,7 @@ def pytest_runtest_setup(item):
     """
 
     def callbinrepr(op, left, right):
+        # type: (str, object, object) -> Optional[str]
         """Call the pytest_assertrepr_compare hook and prepare the result
 
         This uses the first result from the hook and then ensures the
@@ -132,16 +133,27 @@ def pytest_runtest_setup(item):
             if new_expl:
                 new_expl = truncate.truncate_if_required(new_expl, item)
                 new_expl = [line.replace("\n", "\\n") for line in new_expl]
-                res = six.text_type("\n~").join(new_expl)
+                res = "\n~".join(new_expl)
                 if item.config.getvalue("assertmode") == "rewrite":
                     res = res.replace("%", "%%")
                 return res
+        return None
 
     util._reprcompare = callbinrepr
+
+    if item.ihook.pytest_assertion_pass.get_hookimpls():
+
+        def call_assertion_pass_hook(lineno, orig, expl):
+            item.ihook.pytest_assertion_pass(
+                item=item, lineno=lineno, orig=orig, expl=expl
+            )
+
+        util._assertion_pass = call_assertion_pass_hook
 
 
 def pytest_runtest_teardown(item):
     util._reprcompare = None
+    util._assertion_pass = None
 
 
 def pytest_sessionfinish(session):
